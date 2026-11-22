@@ -1,4 +1,4 @@
-// Findet Pi-Session-Dateien. Gelesen wird ausschließlich unterhalb des Sessions-Ordners.
+// Finds Pi session files. Only files below the sessions folder are read.
 import { readdirSync, readFileSync, realpathSync, statSync, watch } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve, sep } from 'node:path'
@@ -13,14 +13,14 @@ export function expandHome(path: string): string {
   return trimmed
 }
 
-/** Ordnername, unter dem Pi die Sessions eines Arbeitsverzeichnisses ablegt. */
+/** Folder name under which Pi stores the sessions of a working directory. */
 export function sessionDirName(cwd: string): string {
   return `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`
 }
 
 /**
- * Liegt die Datei nach Auflösen aller symbolischen Links unterhalb des Ordners? Ein Link, der aus
- * dem Sessions-Ordner hinauszeigt, zählt als außerhalb; eine fehlende Datei ebenso.
+ * Is the file below the folder once all symbolic links are resolved? A link pointing out of the
+ * sessions folder counts as outside, and so does a missing file.
  */
 function isInside(dir: string, file: string): boolean {
   try {
@@ -50,7 +50,7 @@ function subdirs(dir: string): string[] {
   }
 }
 
-/** Index aller Session-Dateien eines Durchlaufs: Pi-Session-ID → Pfad. */
+/** Index of all session files for one pass: Pi session id → path. */
 export class SessionIndex {
   private byId: Map<string, string> | null = null
 
@@ -61,7 +61,7 @@ export class SessionIndex {
     this.byId = new Map()
     for (const sub of subdirs(this.dir)) {
       for (const name of jsonlFiles(sub)) {
-        // Dateiname: <Zeitstempel>_<Session-ID>.jsonl
+        // File name: <timestamp>_<session id>.jsonl
         const id = name.slice(name.lastIndexOf('_') + 1, -'.jsonl'.length)
         const path = join(sub, name)
         if (id && isInside(this.dir, path)) this.byId.set(id, path)
@@ -71,8 +71,8 @@ export class SessionIndex {
   }
 
   /**
-   * Orca nennt eine Pi-Session entweder mit ihrer ID oder mit dem Pfad ihrer Datei.
-   * Ein Pfad außerhalb des Sessions-Ordners wird nicht gelesen.
+   * Orca names a Pi session either by its id or by the path of its file.
+   * A path outside the sessions folder is not read.
    */
   find(sessionId: string | null | undefined): string | null {
     if (!sessionId) return null
@@ -82,7 +82,7 @@ export class SessionIndex {
     return this.index().get(sessionId) ?? null
   }
 
-  /** Die zuletzt geschriebene Session eines Arbeitsverzeichnisses. */
+  /** The most recently written session of a working directory. */
   newestFor(cwd: string): string | null {
     const dir = join(this.dir, sessionDirName(cwd))
     let newest: { path: string; mtime: number } | null = null
@@ -93,14 +93,14 @@ export class SessionIndex {
         const mtime = statSync(path).mtimeMs
         if (!newest || mtime > newest.mtime) newest = { path, mtime }
       } catch {
-        // Datei zwischen Auflisten und Lesen verschwunden.
+        // The file disappeared between listing and reading.
       }
     }
     return newest?.path ?? null
   }
 }
 
-/** Workflow-Stapel einer Session-Datei, null wenn sie nicht lesbar ist. */
+/** Workflow stack of a session file, null when it cannot be read. */
 export function readWorkflowStack(path: string): WorkflowLevel[] | null {
   try {
     return parseWorkflowStack(readFileSync(path, 'utf8'))
@@ -110,9 +110,9 @@ export function readWorkflowStack(path: string): WorkflowLevel[] | null {
 }
 
 /**
- * Ruft `onChange` auf, sobald eine Session-Datei geschrieben wurde, gebündelt über `delayMs`.
- * Gibt eine Funktion zum Beenden zurück; ein fehlender Ordner liefert `null`. Fällt der Watcher
- * später aus, ruft er `onFailure`, damit der Aufrufer ihn neu anlegen kann.
+ * Calls `onChange` once a session file was written, batched over `delayMs`.
+ * Returns a function that stops watching; a missing folder returns `null`. If the watcher fails
+ * later it calls `onFailure` so the caller can create it again.
  */
 export function watchSessions(
   dir: string,

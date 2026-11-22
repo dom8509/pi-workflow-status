@@ -1,9 +1,28 @@
 {
   "manifestVersion": 2,
   "id": "pi-workflow-status",
-  "name": "Workflow Status",
+  "name": "PI Workflow Status",
   "version": "0.1.0",
-  "description": "Shows the Pi workflow and stage of every agent in every workspace.",
+  "description": "See which Pi workflow and stage every agent in Orca is in: an Activity list of all agents with workflow chips, and the selected agent's pipeline with done, current and pending stages.",
+  "license": "MIT",
+  "repository": "https://github.com/dom8509/pi-workflow-status",
+  "icon": "assets/icon.png",
+  "cover": {
+    "path": "assets/cover.png",
+    "alt": "PI Workflow Status: an Activity list of agents with workflow chips above the pipeline of the selected agent, in a light and a dark theme"
+  },
+  "screenshots": [
+    {
+      "path": "assets/screenshot-panel.png",
+      "alt": "Two panels in the light theme: one shows a Coding workflow in its implement stage, the other a Package workflow in verify with a nested ResultCheck",
+      "caption": "Every agent with its workflow, and the selected pipeline stage by stage"
+    },
+    {
+      "path": "assets/screenshot-dark.png",
+      "alt": "The same two panels in the dark theme",
+      "caption": "Light and dark themes"
+    }
+  ],
   "engines": {
     "orca": ">=1.4.259"
   },
@@ -14,7 +33,7 @@
     "panels": [
       {
         "id": "workflow-status",
-        "title": "Workflow Status",
+        "title": "PI Workflow Status",
         "icon": "layers",
         "entry": "src/panel/main.ts"
       }
@@ -30,10 +49,20 @@
     ]
   },
   "capabilities": [
-    { "kind": "workspace:read" },
-    { "kind": "agent:read" },
-    { "kind": "settings:own" },
-    { "kind": "history:read" },
-    { "kind": "storage:own" }
+    {
+      "kind": "workspace:read"
+    },
+    {
+      "kind": "agent:read"
+    },
+    {
+      "kind": "settings:own"
+    },
+    {
+      "kind": "history:read"
+    },
+    {
+      "kind": "storage:own"
+    }
   ]
 }

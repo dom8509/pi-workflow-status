@@ -1,0 +1,31 @@
+name: Implementation
+description: A change to the plugin with acceptance criteria
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal and context
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and exclusions
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      description: 'One criterion per line with id and kind of evidence, for example "AC1 …, evidence: unit test".'
+    validations:
+      required: true
+  - type: dropdown
+    id: acceptance
+    attributes:
+      label: User acceptance required
+      options:
+        - "yes"
+        - "no"
+    validations:
+      required: true

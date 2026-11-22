@@ -1,12 +1,12 @@
-// HTML-Panel: verbindet Orca mit dem Ansichtsmodell aus ../view. Orca erzeugt die Seite um dieses
-// Skript; Farben und Schriften kommen ausschließlich aus den `--orca-*`-Variablen des Themes.
+// HTML panel: connects Orca to the view model in ../view. Orca generates the page around this
+// script; styles live in ./style.
 import '../protocol'
 import type { JobsSnapshot } from '../protocol'
 import { FilterStore } from '../filter-store'
 import { renderPanel } from '../view'
 import { PANEL_CSS } from './style'
 
-/** Abstand der Nachfrage, solange das Panel sichtbar ist; hält den Worker und seinen Watcher wach. */
+/** Refresh interval while the panel is visible; keeps the worker and its watcher alive. */
 const KEEP_ALIVE_MS = 15_000
 
 const style = document.createElement('style')
@@ -20,7 +20,7 @@ document.body.appendChild(root)
 let snapshot: JobsSnapshot | null = null
 let error: string | null = null
 let selected: string | null = null
-/** Filter „Workflows only“: Vorgabe an, die Wahl liegt im Plugin-Speicher (`storage:own`). */
+/** "Workflows only" filter: on by default, the choice lives in plugin storage (`storage:own`). */
 const FILTER_KEY = 'workflowsOnly'
 const filter = new FilterStore(
   true,
@@ -32,8 +32,8 @@ let sequence = 0
 let lastHtml = ''
 
 /**
- * Zeichnet neu und erhält dabei Tastaturfokus und Scrollposition der Liste, denn jede
- * Aktualisierung ersetzt die Knoten. Unveränderter Inhalt wird gar nicht neu gezeichnet.
+ * Redraws while keeping keyboard focus and scroll positions, because every update replaces the
+ * nodes. Unchanged content is not redrawn at all.
  */
 function draw(): void {
   const html = renderPanel({ snapshot, selected, error: error ?? filter.error, now: Date.now(), workflowsOnly: filter.shown })
@@ -57,7 +57,7 @@ function draw(): void {
       root.querySelector<HTMLElement>('[data-filter]')?.focus({ preventScroll: true })
     }
   }
-  // Die Auswahl merkt sich, welcher Job tatsächlich gezeigt wird.
+  // Remember which job is actually shown.
   selected = root.querySelector<HTMLElement>('.job.selected')?.dataset.key ?? selected
 }
 
@@ -91,7 +91,7 @@ orca.plugin.on('jobs.changed', () => void refresh())
 orca.on('agent.status.changed', () => void refresh())
 orca.on('workspace.changed', () => void refresh())
 
-// Wird das Panel wieder sichtbar, sofort nachfragen: der Worker kann inzwischen beendet sein.
+// Refresh as soon as the panel becomes visible again: the worker may have stopped meanwhile.
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void refresh()
 })
@@ -109,7 +109,7 @@ async function loadFilter(): Promise<void> {
     const stored = await orca.storage.get(FILTER_KEY)
     if (typeof stored === 'boolean') filter.loaded(stored)
   } catch {
-    // Ohne Speicher gilt die Vorgabe.
+    // Without storage the default applies.
   }
 }
 

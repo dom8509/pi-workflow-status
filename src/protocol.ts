@@ -1,13 +1,13 @@
-// Vertrag zwischen Panel und Worker, einmal deklariert: src/panel.tsx und src/worker.ts lesen ihn.
+// Contract between panel and worker, declared once: src/panel/main.ts and src/worker.ts read it.
 import type { WorkflowLevel } from './parse'
 
 export type AgentState = 'working' | 'blocked' | 'waiting' | 'done'
 
 /**
- * Workflow-Zustand eines Agenten:
- * `none`    — der Agent ist kein Pi-Agent, er hat keinen Workflow (zum Beispiel Claude Code);
- * `unknown` — Pi-Agent, aber seine Session-Datei ist nicht auffindbar oder nicht lesbar;
- * sonst der Workflow-Stapel, unten zuerst; leer, wenn kein Workflow aktiv ist.
+ * Workflow state of an agent:
+ * `none`    — not a Pi agent, so no workflow (for example Claude Code);
+ * `unknown` — a Pi agent whose session file cannot be found or read;
+ * otherwise the workflow stack, bottom first; empty when no workflow is active.
  */
 export type JobWorkflow = 'none' | 'unknown' | WorkflowLevel[]
 
@@ -24,7 +24,7 @@ export type JobGroup = {
   workspaceId: string
   name: string
   jobs: Job[]
-  /** Gesetzt, wenn Orca die Agenten dieses Workspaces nicht liefern konnte. */
+  /** Set when Orca could not list the agents of this workspace. */
   error?: string
 }
 
@@ -32,11 +32,11 @@ export type JobsSnapshot = { groups: JobGroup[]; sessionsDir: string }
 
 declare module 'orca' {
   interface PluginRequests {
-    /** Alle Agenten aller lokalen Workspaces mit ihrem Workflow-Zustand. */
+    /** All agents of all local workspaces with their workflow state. */
     'jobs.list': { output: JobsSnapshot }
   }
   interface PluginPanelEvents {
-    /** Eine Pi-Session-Datei hat sich geändert; das Panel fragt `jobs.list` neu ab. */
+    /** A Pi session file changed; the panel asks `jobs.list` again. */
     'jobs.changed': { at: number }
   }
 }

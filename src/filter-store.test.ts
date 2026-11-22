@@ -1,5 +1,5 @@
-// Prüft das Speichern des Filters „Workflows only“: höchstens ein Schreibvorgang gleichzeitig,
-// die Anzeige folgt immer dem zuletzt gewählten oder, nach einem Fehler, dem gespeicherten Wert.
+// Tests saving the "Workflows only" filter: at most one write at a time, and the panel always
+// shows the latest choice or, after a failure, the saved value.
 import { assert, test } from 'orca/testing'
 import { FilterStore } from './filter-store'
 
@@ -28,21 +28,21 @@ function harness(initial: boolean) {
   return { store, writes, persisted, changes, settle }
 }
 
-test('schnelles Umschalten schreibt nacheinander und endet beim letzten Wert', async () => {
+test('rapid toggling writes one after another and ends at the latest value', async () => {
   const h = harness(true)
   h.store.choose(false)
   h.store.choose(true)
   h.store.choose(false)
-  assert.equal(h.writes.length, 1, 'mehr als ein Schreibvorgang gleichzeitig')
+  assert.equal(h.writes.length, 1, 'more than one write at a time')
   assert.equal(h.store.shown, false)
   h.writes[0].resolve()
   await h.settle()
-  assert.equal(h.writes.length, 1, 'der letzte Wert entspricht schon dem gespeicherten')
+  assert.equal(h.writes.length, 1, 'the latest value already equals the saved one')
   assert.equal(h.persisted.value, false)
   assert.equal(h.store.shown, false)
 })
 
-test('wechselt der Wunsch während des Schreibens, folgt ein zweiter Schreibvorgang', async () => {
+test('a choice changed during a write triggers a second write', async () => {
   const h = harness(true)
   h.store.choose(false)
   h.store.choose(true)
@@ -57,7 +57,7 @@ test('wechselt der Wunsch während des Schreibens, folgt ein zweiter Schreibvorg
   assert.equal(h.store.error, null)
 })
 
-test('schlägt der einzige Schreibvorgang fehl, zeigt die Anzeige den gespeicherten Wert und den Grund', async () => {
+test('a failed write shows the saved value and the reason', async () => {
   const h = harness(true)
   h.store.choose(false)
   h.writes[0].reject(new Error('disk full'))
@@ -66,7 +66,7 @@ test('schlägt der einzige Schreibvorgang fehl, zeigt die Anzeige den gespeicher
   assert.equal(h.store.error, 'Could not save the filter: disk full')
 })
 
-test('erst Erfolg, dann Fehler: Anzeige und Speicher stimmen überein', async () => {
+test('success then failure: display and storage agree', async () => {
   const h = harness(true)
   h.store.choose(false)
   h.store.choose(true)
@@ -79,7 +79,7 @@ test('erst Erfolg, dann Fehler: Anzeige und Speicher stimmen überein', async ()
   assert.ok(h.store.error)
 })
 
-test('eine neue Wahl nach einem Fehler entfernt die Meldung, sobald sie gespeichert ist', async () => {
+test('a new choice after a failure clears the message once it is saved', async () => {
   const h = harness(true)
   h.store.choose(false)
   h.writes[0].reject(new Error('nope'))
@@ -91,7 +91,7 @@ test('eine neue Wahl nach einem Fehler entfernt die Meldung, sobald sie gespeich
   assert.equal(h.store.error, null)
 })
 
-test('ein später geladener gespeicherter Wert gilt nur, solange niemand gewählt hat', () => {
+test('a stored value loaded late applies only while nobody has chosen', () => {
   const h = harness(true)
   h.store.loaded(false)
   assert.equal(h.store.shown, false)

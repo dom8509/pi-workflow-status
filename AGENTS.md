@@ -1,16 +1,16 @@
-# orca-workflow-status
+# pi-workflow-status
 
-Orca-Plugin, das für jeden Agenten den Pi-Workflow und die Phase anzeigt. Aufbau und Befehle
-stehen in `README.md`; die Plugin-Regeln von Orca liefert `orca skills get orca-plugin-authoring`.
+Orca plugin that shows the Pi workflow and stage of every agent. Structure and commands are in
+`README.md`; Orca's plugin rules come from `orca skills get orca-plugin-authoring`.
 
 ## Tracking
 
-GitHub-Issues in `dom8509/orca-workflow-status`, Regeln in `docs/agents/issue-tracker.md`.
+GitHub issues in `dom8509/pi-workflow-status`, rules in `docs/agents/issue-tracker.md`.
 
-## Definition of Done
+## Definition of done
 
-Ein Issue ist fertig, wenn jedes Akzeptanzkriterium einzeln belegt ist, mit Kommando und
-Ausgabe. Mindestens grün sein müssen:
+An issue is done when every acceptance criterion is proven on its own, with the command and its
+output. At least these must pass:
 
 ```sh
 orca plugin test . --json
@@ -18,10 +18,10 @@ orca plugin check . --json
 orca plugin validate . --json
 ```
 
-Neue oder geänderte Capabilities in `orca-plugin.json` brauchen eine erneute Freigabe in Orca;
-die PR-Beschreibung nennt sie.
+New or changed capabilities in `orca-plugin.json` need a new approval in Orca; the pull request
+description lists them.
 
-## Sprache
+## Language
 
-Deutsch: Issues, Commits, PR-Beschreibungen, Kommentare und Dokumente. Englisch: Code,
-Bezeichner, Dateinamen und die Oberfläche des Plugins.
+Everything in this repository is English: code, comments, documents, issues, commits, pull
+requests and the plugin's interface.
