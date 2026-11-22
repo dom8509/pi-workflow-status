@@ -45,6 +45,13 @@
         "description": "Folder in which Pi stores its session files. ~ stands for your home folder.",
         "type": "string",
         "default": "~/.pi/agent/sessions"
+      },
+      {
+        "key": "remoteServers",
+        "title": "Remote Orca servers",
+        "description": "Paired Orca servers whose jobs to show, as names or ids separated by commas. Empty asks every saved server. The plugin must be loaded as a development folder on each server.",
+        "type": "string",
+        "default": ""
       }
     ]
   },

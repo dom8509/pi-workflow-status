@@ -190,3 +190,17 @@ test('names like object properties still yield a hue 0–359', () => {
     assert.ok(Number.isInteger(hue) && hue >= 0 && hue < 360, `${name} → ${String(hue)}`)
   }
 })
+
+test('remote jobs show their server name; unreadable ones say so', () => {
+  const remote: JobsSnapshot = {
+    sessionsDir: '/s',
+    groups: [
+      { workspaceId: 'env-1/ws', name: 'release', host: 'Mac mini', jobs: [{ key: 'env-1/r1', title: 'Ship', agent: 'pi', state: 'working', stateStartedAt: 1, workflow: snapshot.groups[0].jobs[1].workflow }] },
+      { workspaceId: 'ssh-ws', name: 'box', host: 'ssh:box', jobs: [{ key: 'y', title: 'Box job', agent: 'claude', state: 'done', stateStartedAt: 0, workflow: 'remote' }] }
+    ]
+  }
+  const html = renderPanel({ snapshot: remote, selected: null, error: null, now: 0, workflowsOnly: false })
+  assert.ok(html.includes('<span class="host">Mac mini</span>'), 'server name missing')
+  assert.ok(html.includes('<span class="no-workflow">workflow not readable</span>'))
+  assert.ok(html.includes('title="Mac mini · release"'))
+})
