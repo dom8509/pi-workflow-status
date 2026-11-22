@@ -1,0 +1,38 @@
+{
+  "manifestVersion": 2,
+  "id": "orca-workflow-status",
+  "name": "Workflow Status",
+  "version": "0.1.0",
+  "description": "Shows the Pi workflow and stage of every agent in every workspace.",
+  "engines": {
+    "orca": ">=1.4.259"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "contributes": {
+    "panels": [
+      {
+        "id": "workflow-status",
+        "title": "Workflow Status",
+        "icon": "layers",
+        "entry": "src/panel.tsx",
+        "ui": "components"
+      }
+    ],
+    "settings": [
+      {
+        "key": "sessionsDir",
+        "title": "Pi sessions folder",
+        "description": "Folder in which Pi stores its session files. ~ stands for your home folder.",
+        "type": "string",
+        "default": "~/.pi/agent/sessions"
+      }
+    ]
+  },
+  "capabilities": [
+    { "kind": "workspace:read" },
+    { "kind": "agent:read" },
+    { "kind": "settings:own" }
+  ]
+}
