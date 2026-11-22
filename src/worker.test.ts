@@ -29,6 +29,20 @@ function session(...data: unknown[]): string {
   return lines.join('\n') + '\n'
 }
 
+/** Erwarteter Stapel für `inPlan`; die Fixture-Definition hat keine Beschreibungen. */
+const PLAN = {
+  workflow: 'Coding',
+  stage: 'plan',
+  stageNumber: 3,
+  stageCount: 4,
+  stages: [
+    { id: 'understand', description: null },
+    { id: 'specify', description: null },
+    { id: 'plan', description: null },
+    { id: 'implement', description: null }
+  ]
+}
+
 const inPlan = session(
   { kind: 'activated', workflow: coding, route: ['understand'], mode: 'replace' },
   { kind: 'transitioned', route: ['understand', 'specify', 'plan'] }
@@ -64,12 +78,17 @@ type AgentRow = {
 
 function host(
   agentsByWorkspace: Record<string, AgentRow[] | Error>,
-  extra: { workspaces?: unknown[]; sessions?: Record<string, unknown[] | Error> } = {}
+  extra: {
+    workspaces?: unknown[]
+    sessions?: Record<string, unknown[] | Error>
+    sessionsDelayMs?: number
+  } = {}
 ) {
   return mockHost({
     settings: { sessionsDir: root },
     results: {
-      'agent.listSessions': (params: { workspaceId?: string }) => {
+      'agent.listSessions': async (params: { workspaceId?: string }) => {
+        if (extra.sessionsDelayMs) await new Promise((resolve) => setTimeout(resolve, extra.sessionsDelayMs))
         const answer = extra.sessions?.[params.workspaceId ?? ''] ?? []
         if (answer instanceof Error) throw answer
         return { sessions: answer, truncated: false }
@@ -111,7 +130,7 @@ test('listet Pi- und andere Agenten pro Workspace mit Workflow-Zustand (AK1, AK2
           agent: 'pi',
           state: 'working',
           stateStartedAt: 1000,
-          workflow: [{ workflow: 'Coding', stage: 'plan', stageNumber: 3, stageCount: 4 }]
+          workflow: [PLAN]
         }
       ]
     },
@@ -143,7 +162,7 @@ test('nimmt eine sessionId, die ein Pfad im Sessions-Ordner ist, und lehnt Pfade
   assert.deepEqual(
     groups[0].jobs.map((job) => [job.key, job.workflow]),
     [
-      ['t1', [{ workflow: 'Coding', stage: 'plan', stageNumber: 3, stageCount: 4 }]],
+      ['t1', [PLAN]],
       ['t2', 'unknown']
     ]
   )
@@ -167,7 +186,7 @@ test('ohne passende sessionId nimmt der einzige Pi-Agent die neueste Session sei
     })
   })
   const { groups } = await worker.request('jobs.list')
-  assert.deepEqual(groups[0].jobs[0].workflow, [{ workflow: 'Coding', stage: 'plan', stageNumber: 3, stageCount: 4 }])
+  assert.deepEqual(groups[0].jobs[0].workflow, [PLAN])
   await worker.deactivate()
 })
 
@@ -399,5 +418,61 @@ test('ein anfangs fehlender Sessions-Ordner wird beim nächsten jobs.list beobac
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
   assert.ok(worker.posts.some((post) => post.event === 'jobs.changed'), 'kein jobs.changed')
+  await worker.deactivate()
+})
+
+async function waitForPost(worker: { posts: readonly { event: string }[] }, count: number, limitMs: number): Promise<number> {
+  const started = Date.now()
+  while (worker.posts.filter((post) => post.event === 'jobs.changed').length < count && Date.now() - started < limitMs) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  return Date.now() - started
+}
+
+test('eine langsame Historie verzögert jobs.list nicht; ihr Titel kommt mit jobs.changed nach (AK5)', async () => {
+  const path = join(root, DIR_A, `2026-11-22T11-41-28-639Z_${PI_ID}.jsonl`)
+  writeFileSync(path, inPlan)
+  const worker = await mountWorker(main, {
+    host: host(
+      { [WS_A]: [{ terminalId: null, title: null, agent: 'pi', state: 'working', stateStartedAt: 1, sessionId: path }] },
+      { sessions: { [WS_A]: [historySession(PI_ID, 'Spät geladener Titel')] }, sessionsDelayMs: 900 }
+    )
+  })
+  // `worker.request` wartet im Test-Kit, bis alle Host-Aufrufe erledigt sind; die Dauer ist hier
+  // deshalb kein Maß. Dass die Antwort nicht auf die Historie gewartet hat, zeigt der Titel.
+  const first = await worker.request('jobs.list')
+  assert.equal(first.groups[0].jobs[0].title, 'pi')
+  assert.deepEqual(first.groups[0].jobs[0].workflow, [PLAN])
+  const before = worker.posts.filter((post) => post.event === 'jobs.changed').length
+  await waitForPost(worker, before + 1, 2000)
+  const second = await worker.request('jobs.list')
+  assert.equal(second.groups[0].jobs[0].title, 'Spät geladener Titel')
+  await worker.deactivate()
+})
+
+test('ein später angelegter Sessions-Ordner wird ohne weitere Anfrage beobachtet (AK5)', async () => {
+  const later = join(root, 'spaeter-ohne-anfrage')
+  const worker = await mountWorker(main, {
+    host: mockHost({
+      settings: { sessionsDir: later },
+      results: { 'workspace.list': { workspaces: [], truncated: false } }
+    })
+  })
+  await worker.request('jobs.list')
+  mkdirSync(join(later, DIR_A), { recursive: true })
+  // Sobald der Watcher steht, meldet der Worker das, damit das Panel Sessions aus der Lücke sieht.
+  const elapsed = await waitForPost(worker, 1, 2000)
+  assert.ok(worker.posts.some((post) => post.event === 'jobs.changed'), `kein jobs.changed nach ${elapsed} ms`)
+  await worker.deactivate()
+})
+
+test('der Schlüssel eines Jobs ohne Terminal ist seine sessionId und bleibt stabil', async () => {
+  const worker = await mountWorker(main, {
+    host: host({
+      [WS_A]: [{ terminalId: null, title: null, agent: 'claude', state: 'done', stateStartedAt: 1, sessionId: 'abc' }]
+    })
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.equal(groups[0].jobs[0].key, `${WS_A}#abc`)
   await worker.deactivate()
 })

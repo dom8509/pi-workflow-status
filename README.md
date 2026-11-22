@@ -1,8 +1,10 @@
 # Workflow Status
 
 Ein Orca-Plugin, das in der rechten Sidebar für jeden Agenten aller lokalen Workspaces anzeigt,
-in welchem Pi-Workflow und in welcher Phase er steht, zum Beispiel
-`Coding › plan (3/6, next: implement) ⟶ ResultCheck › check (1/2)`.
+in welchem Pi-Workflow und in welcher Phase er steht. Oben steht die Liste „Activity“ mit allen
+Jobs, laufende zuerst; darunter die Pipeline des ausgewählten Jobs als Zeitleiste mit erledigten,
+aktueller und offenen Phasen samt ihrer Beschreibung. Ein Prüf-Workflow wie ResultCheck erscheint
+eingerückt unter der aktuellen Phase.
 
 ## Wie es funktioniert
 
@@ -15,12 +17,16 @@ in welchem Pi-Workflow und in welcher Phase er steht, zum Beispiel
   `transitioned`, `exited`) entlang des aktuellen Zweigs und baut daraus den Workflow-Stapel.
 - Jobnamen kommen exakt über die `sessionId` aus Orcas Session-Historie (`agent.listSessions`,
   Recht `history:read`). Fehlt dort ein Treffer, fragt der Worker `orca agent list --json` und
-  übernimmt einen Tab-Titel nur, wenn im Workspace genau ein Agent dieser Art läuft; er wartet
-  darauf höchstens 1,5 s. Sonst steht die Agent-Art als Name da.
+  übernimmt einen Tab-Titel nur, wenn im Workspace genau ein Agent dieser Art läuft. `jobs.list`
+  wartet auf Titel höchstens 300 ms; später eintreffende meldet der Worker per `jobs.changed`.
+  Sonst steht die Agent-Art als Name da.
+- `src/view.ts` baut daraus Liste und Pipeline als HTML; `src/panel/main.ts` ist das HTML-Panel,
+  `src/panel/style.ts` sein CSS, ausschließlich aus den `--orca-*`-Variablen des Themes.
 - Der Worker beobachtet den Sessions-Ordner und meldet geänderte Sessions nach 500 ms an das
   Panel (`jobs.changed`). Das Panel fragt außerdem bei jeder Statusänderung eines Agenten, bei
-  jedem Workspace-Wechsel und, solange es sichtbar ist, alle 15 s neu ab; das hält den Worker und
-  damit den Watcher am Leben.
+  jedem Workspace-Wechsel, sofort beim Sichtbarwerden und, solange es sichtbar ist, alle 15 s neu
+  ab; das hält den Worker und damit den Watcher am Leben. Fehlt der Sessions-Ordner oder fällt der
+  Watcher aus, legt der Worker ihn jede Sekunde neu an und meldet danach `jobs.changed`.
 
 Anzeige in der Spalte Workflow: `no workflow` für Agenten ohne Pi-Session (zum Beispiel Claude
 Code), `unknown` für Pi-Agenten ohne auffindbare Session, `—` für Pi-Agenten ohne aktiven Workflow.
@@ -34,8 +40,8 @@ vorbehält. Das Panel gibt es nur in der Desktop-App von Orca.
 ## Entwickeln
 
 ```sh
-orca plugin test .       # Unit-Tests: Parser, Sessions, Worker, Panel
-orca plugin check .      # zeichnet das Panel in den Szenarien aus src/panel.check.ts
+orca plugin test .       # Unit-Tests: Parser, Sessions, Worker, Ansichtsmodell
+orca plugin shot local.pi-workflow-status   # Screenshot des geladenen Panels
 orca plugin validate .
 orca plugin dev watch .  # lädt den Ordner in Orca; Ctrl-C entlädt ihn
 ```

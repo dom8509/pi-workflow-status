@@ -1,7 +1,12 @@
 // Prüft die Auswertung der Pi-Session-Datei: Workflow-Stapel aus den `workflow-state`-Einträgen.
 // Die Zeilen folgen der Form echter Sessions unter ~/.pi/agent/sessions (gekürzt).
 import { assert, test } from 'orca/testing'
-import { parseWorkflowStack } from './parse'
+import { parseWorkflowStack as parseFull, type WorkflowLevel } from './parse'
+
+/** Die meisten Tests prüfen nur Workflow und Phase; die Phasenliste prüft ein eigener Test. */
+function parseWorkflowStack(text: string): Omit<WorkflowLevel, 'stages'>[] {
+  return parseFull(text).map(({ stages: _stages, ...rest }) => rest)
+}
 
 const coding = {
   id: 'Coding',
@@ -142,5 +147,29 @@ test('eine Phase, die der Workflow nicht kennt, hat keine Nummer', () => {
   ].join('\n')
   assert.deepEqual(parseWorkflowStack(text), [
     { workflow: 'Custom', stage: 'x', stageNumber: null, stageCount: null }
+  ])
+})
+
+test('jede Ebene trägt die Phasen ihrer Definition mit Beschreibung', () => {
+  const text = [
+    header,
+    state('a', null, {
+      kind: 'activated',
+      workflow: {
+        id: 'Coding',
+        stages: [
+          { id: 'understand', description: 'Collect the facts of the task and the state of the project' },
+          { id: 'plan', description: 'Agree a short plan with the user' },
+          { id: 'odd' }
+        ]
+      },
+      route: ['understand'],
+      mode: 'replace'
+    })
+  ].join('\n')
+  assert.deepEqual(parseFull(text)[0].stages, [
+    { id: 'understand', description: 'Collect the facts of the task and the state of the project' },
+    { id: 'plan', description: 'Agree a short plan with the user' },
+    { id: 'odd', description: null }
   ])
 })

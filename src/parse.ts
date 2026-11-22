@@ -19,13 +19,17 @@ export type WorkflowLevel = {
   stageCount: number | null
   /** Phase, in die dieser Workflow wechselt, sobald der darüberliegende Prüf-Workflow sie freigibt. */
   pendingStage?: string
+  /** Phasen der Definition in ihrer Reihenfolge; leer, wenn die Definition keine nennt. */
+  stages: StageInfo[]
 }
+
+export type StageInfo = { id: string; description: string | null }
 
 type Entry = { id: string; parentId: string | null; data?: Record<string, unknown> }
 
 type Frame = {
   workflow: string
-  stages: string[] | null
+  stages: StageInfo[] | null
   route: string[]
   /** Ziel des Übergangs, auf dessen Freigabe der darunterliegende Workflow wartet. */
   releases?: string
@@ -85,9 +89,11 @@ function frameOf(data: Record<string, unknown>): Frame | null {
   const route = stringArray(data.route)
   if (!workflow || typeof workflow.id !== 'string' || !route) return null
   const stages = Array.isArray(workflow.stages)
-    ? workflow.stages
-        .map((stage) => (stage && typeof stage === 'object' ? (stage as { id?: unknown }).id : null))
-        .filter((id): id is string => typeof id === 'string')
+    ? workflow.stages.flatMap((stage): StageInfo[] => {
+        const record = stage && typeof stage === 'object' ? (stage as { id?: unknown; description?: unknown }) : null
+        if (!record || typeof record.id !== 'string') return []
+        return [{ id: record.id, description: typeof record.description === 'string' ? record.description : null }]
+      })
     : null
   const pending = data.pendingTransition as { stageId?: unknown } | undefined
   const releases = typeof pending?.stageId === 'string' ? pending.stageId : undefined
@@ -121,12 +127,13 @@ export function parseWorkflowStack(text: string): WorkflowLevel[] {
     .filter(({ frame }) => frame.route.length > 0)
     .map(({ frame, pending }) => {
       const stage = frame.route[frame.route.length - 1]
-      const index = frame.stages ? frame.stages.indexOf(stage) : -1
+      const index = frame.stages ? frame.stages.findIndex((info) => info.id === stage) : -1
       const level: WorkflowLevel = {
         workflow: frame.workflow,
         stage,
         stageNumber: index >= 0 ? index + 1 : null,
-        stageCount: frame.stages && index >= 0 ? frame.stages.length : null
+        stageCount: frame.stages && index >= 0 ? frame.stages.length : null,
+        stages: frame.stages ?? []
       }
       if (pending) level.pendingStage = pending
       return level

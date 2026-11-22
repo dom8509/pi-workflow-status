@@ -66,92 +66,170 @@ function historyTitle(agent: AgentRow, history: Map<string, string>): string | u
   return undefined
 }
 
-function titleOf(agent: AgentRow, history: Map<string, string>, cli: CliAgent[], agents: AgentRow[]): string {
-  if (agent.title) return agent.title
-  const exact = historyTitle(agent, history)
-  if (exact) return exact
-  const sameKind = agents.filter((other) => other.agent === agent.agent).length
-  const fromCli = sameKind === 1 ? uniqueCliTitle(cli, agent.agent) : null
-  return fromCli ?? agent.agent ?? 'Agent'
+/** Stabiler Schlüssel eines Jobs, auch ohne Terminal: die sessionId, sonst die Position. */
+function keyOf(workspace: WorkspaceRow, agent: AgentRow, position: number): string {
+  return agent.terminalId ?? `${workspace.id}#${agent.sessionId ?? position}`
 }
 
-function jobsOf(
-  workspace: WorkspaceRow,
-  agents: AgentRow[],
-  index: SessionIndex,
-  history: Map<string, string>,
-  cli: CliAgent[]
-): Job[] {
+function jobsOf(workspace: WorkspaceRow, agents: AgentRow[], index: SessionIndex, titles: Map<string, string>): Job[] {
   const paths = agents.map((agent) => (agent.agent === 'pi' ? index.find(agent.sessionId) : null))
   const pi = agents.filter((agent) => agent.agent === 'pi')
   // Ohne passende sessionId nur dann die neueste Session des Workspaces, wenn sie eindeutig
   // zu genau einem Pi-Agenten gehören kann.
   const fallback = pi.length === 1 ? index.newestFor(workspace.path) : null
-  return agents.map((agent, position) => ({
-    key: agent.terminalId ?? `${workspace.id}#${position}`,
-    title: titleOf(agent, history, cli, agents),
-    agent: agent.agent,
-    state: agent.state,
-    stateStartedAt: agent.stateStartedAt,
-    workflow: agent.agent === 'pi' ? workflowOf(paths[position] ?? fallback) : 'none'
-  }))
+  return agents.map((agent, position) => {
+    const key = keyOf(workspace, agent, position)
+    return {
+      key,
+      title: agent.title ?? titles.get(key) ?? agent.agent ?? 'Agent',
+      agent: agent.agent,
+      state: agent.state,
+      stateStartedAt: agent.stateStartedAt,
+      workflow: agent.agent === 'pi' ? workflowOf(paths[position] ?? fallback) : 'none'
+    }
+  })
 }
 
-export async function listJobs(orca: OrcaWorkerApi): Promise<JobsSnapshot> {
+type Fetched = { workspace: WorkspaceRow; agents: AgentRow[] } | { workspace: WorkspaceRow; error: string }
+
+/** Titel aller Jobs ohne eigenen Titel: Historie exakt, CLI nur bei Eindeutigkeit. */
+async function resolveTitles(orca: OrcaWorkerApi, fetched: Fetched[]): Promise<Map<string, string>> {
+  const titles = new Map<string, string>()
+  let cli: Promise<CliAgent[]> | null = null
+  await Promise.all(
+    fetched.map(async (entry) => {
+      if (!('agents' in entry)) return
+      const { workspace, agents } = entry
+      const history = await historyTitles(orca, workspace, agents)
+      const needsCli = agents.some((agent) => !agent.title && !historyTitle(agent, history))
+      if (needsCli && cli === null) cli = cliAgents()
+      const local = needsCli ? (await (cli ?? Promise.resolve([]))).filter((agent) => inWorkspace(agent, workspace)) : []
+      agents.forEach((agent, position) => {
+        if (agent.title) return
+        const exact = historyTitle(agent, history)
+        const sameKind = agents.filter((other) => other.agent === agent.agent).length
+        const title = exact ?? (sameKind === 1 ? uniqueCliTitle(local, agent.agent) : null)
+        if (title) titles.set(keyOf(workspace, agent, position), title)
+      })
+    })
+  )
+  return titles
+}
+
+/** So lange wartet `jobs.list` auf Titel; später eintreffende kommen per `jobs.changed`. */
+const TITLE_BUDGET_MS = 300
+
+function sameTitles(a: Map<string, string>, b: Map<string, string>): boolean {
+  if (a.size !== b.size) return false
+  for (const [key, title] of a) if (b.get(key) !== title) return false
+  return true
+}
+
+/** Zuletzt bekannte Titel, über Anfragen hinweg; ein neuer Worker beginnt leer. */
+export type TitleStore = { titles: Map<string, string>; onLate: () => void }
+
+export async function listJobs(orca: OrcaWorkerApi, store: TitleStore): Promise<JobsSnapshot> {
   const dir = await sessionsDir(orca)
   const index = new SessionIndex(dir)
   const { workspaces } = (await orca.host.call('workspace.list', {})) as { workspaces: WorkspaceRow[] }
-  // Alle Workspaces parallel; die CLI wird höchstens einmal je Durchlauf gefragt.
-  let cli: Promise<CliAgent[]> | null = null
-  const groups = await Promise.all(
+  const fetched: Fetched[] = await Promise.all(
     workspaces
       // Nur dieser Rechner: Sessions anderer Hosts liegen nicht im lokalen Sessions-Ordner.
       .filter((workspace) => workspace.hostId === null || workspace.hostId === 'local')
-      .map(async (workspace): Promise<JobGroup | null> => {
+      .map(async (workspace): Promise<Fetched> => {
         try {
           const { agents } = (await orca.host.call('agents.list', { workspaceId: workspace.id })) as {
             agents: AgentRow[]
           }
-          if (agents.length === 0) return null
-          const history = await historyTitles(orca, workspace, agents)
-          const needsCli = agents.some((agent) => !agent.title && !historyTitle(agent, history))
-          if (needsCli && cli === null) cli = cliAgents()
-          const local = needsCli ? (await (cli ?? Promise.resolve([]))).filter((agent) => inWorkspace(agent, workspace)) : []
-          return { workspaceId: workspace.id, name: workspace.name, jobs: jobsOf(workspace, agents, index, history, local) }
+          return { workspace, agents }
         } catch (error) {
-          return { workspaceId: workspace.id, name: workspace.name, jobs: [], error: errorMessage(error) }
+          return { workspace, error: errorMessage(error) }
         }
       })
   )
-  return { groups: groups.filter((group): group is JobGroup => group !== null), sessionsDir: dir }
+
+  const work = resolveTitles(orca, fetched)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const intime = await Promise.race([
+    work,
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), TITLE_BUDGET_MS)
+    })
+  ])
+  clearTimeout(timer)
+  if (intime) {
+    store.titles = intime
+  } else {
+    void work.then((late) => {
+      if (sameTitles(late, store.titles)) return
+      store.titles = late
+      store.onLate()
+    })
+  }
+
+  const groups: JobGroup[] = []
+  for (const entry of fetched) {
+    if (!('agents' in entry)) {
+      groups.push({ workspaceId: entry.workspace.id, name: entry.workspace.name, jobs: [], error: entry.error })
+    } else if (entry.agents.length > 0) {
+      groups.push({
+        workspaceId: entry.workspace.id,
+        name: entry.workspace.name,
+        jobs: jobsOf(entry.workspace, entry.agents, index, store.titles)
+      })
+    }
+  }
+  return { groups, sessionsDir: dir }
 }
+
+/** Abstand, in dem der Worker einen fehlenden oder ausgefallenen Watcher neu anlegt. */
+const RETRY_MS = 1000
+
+let dispose: (() => void) | null = null
 
 export default function activate(orca: OrcaWorkerApi): void {
   let stopWatching: (() => void) | null = null
   let watchedDir: string | null = null
+  let retry: ReturnType<typeof setTimeout> | null = null
+  /** Es gab eine Zeit ohne Watcher; Sessions aus dieser Lücke meldet der neue Watcher sofort. */
+  let gap = false
+  const changed = () => orca.panels.post('jobs.changed', { at: Date.now() })
+  const store: TitleStore = { titles: new Map(), onLate: changed }
+
+  function scheduleRetry(): void {
+    if (retry) return
+    retry = setTimeout(() => {
+      retry = null
+      void ensureWatching()
+    }, RETRY_MS)
+  }
 
   async function ensureWatching(): Promise<void> {
     const dir = await sessionsDir(orca)
     if (dir === watchedDir && stopWatching) return
     stopWatching?.()
     watchedDir = dir
-    stopWatching = watchSessions(
-      dir,
-      () => orca.panels.post('jobs.changed', { at: Date.now() }),
-      CHANGE_DELAY_MS,
-      () => {
-        // Beim nächsten jobs.list neu anlegen.
-        stopWatching = null
-        watchedDir = null
-        orca.log(`Watcher für ${dir} ausgefallen`)
-      }
-    )
-    if (!stopWatching) orca.log(`Sessions-Ordner nicht beobachtbar: ${dir}`)
+    stopWatching = watchSessions(dir, changed, CHANGE_DELAY_MS, () => {
+      stopWatching = null
+      watchedDir = null
+      gap = true
+      orca.log(`Watcher für ${dir} ausgefallen`)
+      scheduleRetry()
+    })
+    if (!stopWatching) {
+      gap = true
+      scheduleRetry()
+      return
+    }
+    if (gap) {
+      gap = false
+      changed()
+    }
   }
 
   orca.panels.handle('jobs.list', async () => {
     await ensureWatching()
-    return listJobs(orca)
+    return listJobs(orca, store)
   })
 
   orca.settings.onDidChange(({ key }) => {
@@ -159,12 +237,20 @@ export default function activate(orca: OrcaWorkerApi): void {
     stopWatching?.()
     stopWatching = null
     watchedDir = null
-    void ensureWatching().then(() => orca.panels.post('jobs.changed', { at: Date.now() }))
+    void ensureWatching().then(changed)
   })
+
+  dispose = () => {
+    if (retry) clearTimeout(retry)
+    retry = null
+    stopWatching?.()
+    stopWatching = null
+  }
 
   void ensureWatching()
 }
 
 export function deactivate(): void {
-  // Der Watcher hält den Prozess nicht am Leben (`persistent: false`); Orca beendet den Worker.
+  dispose?.()
+  dispose = null
 }

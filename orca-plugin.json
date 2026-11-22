@@ -16,8 +16,7 @@
         "id": "workflow-status",
         "title": "Workflow Status",
         "icon": "layers",
-        "entry": "src/panel.tsx",
-        "ui": "components"
+        "entry": "src/panel/main.ts"
       }
     ],
     "settings": [
