@@ -2,6 +2,7 @@
 // Skript; Farben und Schriften kommen ausschließlich aus den `--orca-*`-Variablen des Themes.
 import '../protocol'
 import type { JobsSnapshot } from '../protocol'
+import { FilterStore } from '../filter-store'
 import { renderPanel } from '../view'
 import { PANEL_CSS } from './style'
 
@@ -19,14 +20,13 @@ document.body.appendChild(root)
 let snapshot: JobsSnapshot | null = null
 let error: string | null = null
 let selected: string | null = null
-/** Filter „Workflows only“; Vorgabe an, die Wahl liegt im Plugin-Speicher (`storage:own`). */
-let workflowsOnly = true
+/** Filter „Workflows only“: Vorgabe an, die Wahl liegt im Plugin-Speicher (`storage:own`). */
 const FILTER_KEY = 'workflowsOnly'
-const SAVE_ERROR = 'Could not save the filter'
-/** Zuletzt im Speicher bestätigter Filterwert und Zähler der Speichervorgänge. */
-let savedWorkflowsOnly = workflowsOnly
-let saveGeneration = 0
-let confirmedGeneration = 0
+const filter = new FilterStore(
+  true,
+  (value) => orca.storage.set(FILTER_KEY, value),
+  () => draw()
+)
 let sequence = 0
 
 let lastHtml = ''
@@ -36,7 +36,7 @@ let lastHtml = ''
  * Aktualisierung ersetzt die Knoten. Unveränderter Inhalt wird gar nicht neu gezeichnet.
  */
 function draw(): void {
-  const html = renderPanel({ snapshot, selected, error, now: Date.now(), workflowsOnly })
+  const html = renderPanel({ snapshot, selected, error: error ?? filter.error, now: Date.now(), workflowsOnly: filter.shown })
   if (html !== lastHtml) {
     const active = document.activeElement as HTMLElement | null
     const focusedKey = active?.closest?.<HTMLElement>('button.job')?.dataset.key
@@ -77,34 +77,7 @@ async function refresh(): Promise<void> {
 
 root.addEventListener('change', (event) => {
   const input = event.target as HTMLInputElement
-  if (input.dataset.filter !== 'workflows-only') return
-  workflowsOnly = input.checked
-  draw()
-  // Nur die jüngste Änderung zählt. Schlägt sie fehl, gilt wieder der zuletzt bestätigte Wert,
-  // und das Panel sagt warum; ältere Rückmeldungen ändern nichts mehr.
-  const generation = ++saveGeneration
-  const value = workflowsOnly
-  orca.storage.set(FILTER_KEY, value).then(
-    () => {
-      // Auch eine ältere, erst jetzt bestätigte Änderung steht im Speicher, solange keine jüngere
-      // schon bestätigt ist.
-      if (generation > confirmedGeneration) {
-        confirmedGeneration = generation
-        savedWorkflowsOnly = value
-      }
-      if (generation !== saveGeneration) return
-      if (error?.startsWith(SAVE_ERROR)) {
-        error = null
-        draw()
-      }
-    },
-    (cause: unknown) => {
-      if (generation !== saveGeneration) return
-      workflowsOnly = savedWorkflowsOnly
-      error = `${SAVE_ERROR}: ${cause instanceof Error ? cause.message : String(cause)}`
-      draw()
-    }
-  )
+  if (input.dataset.filter === 'workflows-only') filter.choose(input.checked)
 })
 
 root.addEventListener('click', (event) => {
@@ -134,10 +107,7 @@ keepAlive()
 async function loadFilter(): Promise<void> {
   try {
     const stored = await orca.storage.get(FILTER_KEY)
-    if (typeof stored === 'boolean') {
-      workflowsOnly = stored
-      savedWorkflowsOnly = stored
-    }
+    if (typeof stored === 'boolean') filter.loaded(stored)
   } catch {
     // Ohne Speicher gilt die Vorgabe.
   }
