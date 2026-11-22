@@ -1,0 +1,219 @@
+// Prüft den Worker über `jobs.list` und `jobs.changed`, mit Orca als Mock und echten
+// Session-Dateien in einem temporären Ordner.
+import { afterEach, assert, beforeEach, hostError, mockHost, mountWorker, test } from 'orca/testing'
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import * as main from './worker'
+
+const PI_ID = '01a2030f-acbf-7611-ba03-9134156f5b2c'
+const WS_A = 'proj::/Users/dom/orca/workspaces/breathing-mind/hearturchin'
+const WS_B = 'proj::/Users/dom/orca/workspaces/breathing-mind/BM-225'
+const DIR_A = '--Users-dom-orca-workspaces-breathing-mind-hearturchin--'
+const DIR_B = '--Users-dom-orca-workspaces-breathing-mind-BM-225--'
+
+const coding = {
+  id: 'Coding',
+  stages: [{ id: 'understand' }, { id: 'specify' }, { id: 'plan' }, { id: 'implement' }]
+}
+
+function session(...data: unknown[]): string {
+  const lines = [JSON.stringify({ type: 'session', version: 3, id: 'x', cwd: '/x' })]
+  let parent: string | null = null
+  data.forEach((entry, index) => {
+    const id = `e${index}`
+    lines.push(JSON.stringify({ type: 'custom', customType: 'workflow-state', id, parentId: parent, data: entry }))
+    parent = id
+  })
+  return lines.join('\n') + '\n'
+}
+
+const inPlan = session(
+  { kind: 'activated', workflow: coding, route: ['understand'], mode: 'replace' },
+  { kind: 'transitioned', route: ['understand', 'specify', 'plan'] }
+)
+
+let root = ''
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'ows-test-'))
+  mkdirSync(join(root, DIR_A))
+  mkdirSync(join(root, DIR_B))
+})
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+type AgentRow = {
+  terminalId: string | null
+  title: string | null
+  agent: string | null
+  state: 'working' | 'blocked' | 'waiting' | 'done'
+  stateStartedAt: number
+  sessionId?: string | null
+}
+
+function host(agentsByWorkspace: Record<string, AgentRow[] | Error>, extra: { workspaces?: unknown[] } = {}) {
+  return mockHost({
+    settings: { sessionsDir: root },
+    results: {
+      'workspace.list': {
+        workspaces: extra.workspaces ?? [
+          { id: WS_A, kind: 'worktree', name: 'hearturchin', path: '/Users/dom/orca/workspaces/breathing-mind/hearturchin', branch: 'main', hostId: 'local' },
+          { id: WS_B, kind: 'worktree', name: 'BM-225', path: '/Users/dom/orca/workspaces/breathing-mind/BM-225', branch: 'BM-225', hostId: 'local' }
+        ],
+        truncated: false
+      },
+      'agents.list': (params: { workspaceId?: string }) => {
+        const answer = agentsByWorkspace[params.workspaceId ?? '']
+        if (answer instanceof Error) throw answer
+        return { agents: answer ?? [] }
+      }
+    }
+  })
+}
+
+test('listet Pi- und andere Agenten pro Workspace mit Workflow-Zustand (AK1, AK2, AK4, AK7)', async () => {
+  writeFileSync(join(root, DIR_A, `2026-11-22T11-41-28-639Z_${PI_ID}.jsonl`), inPlan)
+  const worker = await mountWorker(main, {
+    host: host({
+      [WS_A]: [{ terminalId: 't1', title: 'Coordinator', agent: 'pi', state: 'working', stateStartedAt: 1000, sessionId: PI_ID }],
+      [WS_B]: [{ terminalId: 't2', title: 'BM-225 (w3)', agent: 'claude', state: 'done', stateStartedAt: 2000, sessionId: 'c7e4972d' }]
+    })
+  })
+  const snapshot = await worker.request('jobs.list')
+  assert.equal(snapshot.sessionsDir, root)
+  assert.deepEqual(snapshot.groups, [
+    {
+      workspaceId: WS_A,
+      name: 'hearturchin',
+      jobs: [
+        {
+          key: 't1',
+          title: 'Coordinator',
+          agent: 'pi',
+          state: 'working',
+          stateStartedAt: 1000,
+          workflow: [{ workflow: 'Coding', stage: 'plan', stageNumber: 3, stageCount: 4 }]
+        }
+      ]
+    },
+    {
+      workspaceId: WS_B,
+      name: 'BM-225',
+      jobs: [{ key: 't2', title: 'BM-225 (w3)', agent: 'claude', state: 'done', stateStartedAt: 2000, workflow: 'none' }]
+    }
+  ])
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('nimmt eine sessionId, die ein Pfad im Sessions-Ordner ist, und lehnt Pfade außerhalb ab', async () => {
+  const inside = join(root, DIR_A, `2026-11-22T11-41-28-639Z_${PI_ID}.jsonl`)
+  writeFileSync(inside, inPlan)
+  const outsideDir = mkdtempSync(join(tmpdir(), 'ows-outside-'))
+  const outside = join(outsideDir, 'x.jsonl')
+  writeFileSync(outside, inPlan)
+  const worker = await mountWorker(main, {
+    host: host({
+      [WS_A]: [
+        { terminalId: 't1', title: 'A', agent: 'pi', state: 'working', stateStartedAt: 1, sessionId: inside },
+        { terminalId: 't2', title: 'B', agent: 'pi', state: 'working', stateStartedAt: 1, sessionId: outside }
+      ]
+    })
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.deepEqual(
+    groups[0].jobs.map((job) => [job.key, job.workflow]),
+    [
+      ['t1', [{ workflow: 'Coding', stage: 'plan', stageNumber: 3, stageCount: 4 }]],
+      ['t2', 'unknown']
+    ]
+  )
+  rmSync(outsideDir, { recursive: true, force: true })
+  await worker.deactivate()
+})
+
+test('ohne passende sessionId nimmt der einzige Pi-Agent die neueste Session seines Workspaces', async () => {
+  const older = join(root, DIR_A, '2026-11-21T08-00-00-000Z_aaaa.jsonl')
+  const newer = join(root, DIR_A, '2026-11-22T08-00-00-000Z_bbbb.jsonl')
+  writeFileSync(older, session({ kind: 'activated', workflow: coding, route: ['understand'], mode: 'replace' }))
+  writeFileSync(newer, inPlan)
+  utimesSync(older, 1000, 1000)
+  utimesSync(newer, 2000, 2000)
+  const worker = await mountWorker(main, {
+    host: host({
+      [WS_A]: [
+        { terminalId: 't1', title: 'A', agent: 'pi', state: 'working', stateStartedAt: 1, sessionId: 'orca-id-unbekannt' },
+        { terminalId: 't9', title: 'Claude', agent: 'claude', state: 'done', stateStartedAt: 1 }
+      ]
+    })
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.deepEqual(groups[0].jobs[0].workflow, [{ workflow: 'Coding', stage: 'plan', stageNumber: 3, stageCount: 4 }])
+  await worker.deactivate()
+})
+
+test('zwei Pi-Agenten ohne passende sessionId im selben Workspace bleiben unknown', async () => {
+  writeFileSync(join(root, DIR_A, '2026-11-22T08-00-00-000Z_bbbb.jsonl'), inPlan)
+  const worker = await mountWorker(main, {
+    host: host({
+      [WS_A]: [
+        { terminalId: 't1', title: 'A', agent: 'pi', state: 'working', stateStartedAt: 1, sessionId: null },
+        { terminalId: 't2', title: 'B', agent: 'pi', state: 'working', stateStartedAt: 1 }
+      ]
+    })
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.deepEqual(groups[0].jobs.map((job) => job.workflow), ['unknown', 'unknown'])
+  await worker.deactivate()
+})
+
+test('ein Fehler eines Workspaces lässt die anderen stehen; leere Workspaces und andere Hosts fehlen (AK6)', async () => {
+  const worker = await mountWorker(main, {
+    host: host(
+      {
+        [WS_A]: hostError('action_failed', 'kaputt'),
+        [WS_B]: [{ terminalId: 't2', title: 'B', agent: 'pi', state: 'waiting', stateStartedAt: 5, sessionId: 'fehlt' }]
+      },
+      {
+        workspaces: [
+          { id: WS_A, kind: 'worktree', name: 'hearturchin', path: '/Users/dom/orca/workspaces/breathing-mind/hearturchin', branch: 'main', hostId: 'local' },
+          { id: WS_B, kind: 'worktree', name: 'BM-225', path: '/Users/dom/orca/workspaces/breathing-mind/BM-225', branch: 'x', hostId: 'local' },
+          { id: 'leer', kind: 'folder', name: 'leer', path: '/tmp/leer', branch: null, hostId: null },
+          { id: 'remote', kind: 'worktree', name: 'remote', path: '/srv/x', branch: 'main', hostId: 'ssh:box' }
+        ]
+      }
+    )
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.deepEqual(groups, [
+    { workspaceId: WS_A, name: 'hearturchin', jobs: [], error: 'kaputt' },
+    {
+      workspaceId: WS_B,
+      name: 'BM-225',
+      jobs: [{ key: 't2', title: 'B', agent: 'pi', state: 'waiting', stateStartedAt: 5, workflow: 'unknown' }]
+    }
+  ])
+  assert.deepEqual(
+    worker.host.calls.filter((call) => call.method === 'agents.list').map((call) => (call.params as { workspaceId: string }).workspaceId),
+    [WS_A, WS_B, 'leer']
+  )
+  await worker.deactivate()
+})
+
+test('meldet eine geänderte Session-Datei innerhalb von 2 s an das Panel (AK5)', async () => {
+  const worker = await mountWorker(main, { host: host({}) })
+  await worker.request('jobs.list')
+  const started = Date.now()
+  writeFileSync(join(root, DIR_A, `2026-11-22T11-41-28-639Z_${PI_ID}.jsonl`), inPlan)
+  while (!worker.posts.some((post) => post.event === 'jobs.changed') && Date.now() - started < 2000) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  assert.ok(
+    worker.posts.some((post) => post.event === 'jobs.changed'),
+    `kein jobs.changed nach ${Date.now() - started} ms`
+  )
+  await worker.deactivate()
+})
