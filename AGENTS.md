@@ -14,6 +14,7 @@ output. At least these must pass:
 
 ```sh
 orca plugin test . --json
+orca plugin check . --json
 orca plugin validate . --json
 ```
 
