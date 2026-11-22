@@ -1,13 +1,13 @@
 Refs #
 
-## Änderung
+## Change
 
-## Nachweise
+## Evidence
 
-| AK | Nachweis (Kommando und Ergebnis) |
+| AC | Evidence (command and result) |
 |---|---|
-| AK1 | |
+| AC1 | |
 
-Neue oder geänderte Capabilities: keine / …
+New or changed capabilities: none / …
 
-Ausstehende Abnahmen: keine / …
+Pending acceptance: none / …

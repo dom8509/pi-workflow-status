@@ -1,8 +1,8 @@
-// Namen der Jobs. `agents.list` liefert keinen Titel, deshalb zwei Quellen:
-// 1. Orcas Session-Historie (`agent.listSessions`), exakt über die `sessionId` des Agenten.
-// 2. Als Ausweg `orca agent list --json`. Die CLI nennt die Tab-Titel, aber mit eigener ID;
-//    ein Titel wird nur übernommen, wenn im Workspace genau ein Agent dieser Art läuft,
-//    weil die Zuordnung sonst raten müsste.
+// Job names. `agents.list` returns no title, so there are two sources:
+// 1. Orca's session history (`agent.listSessions`), matched exactly by the agent's `sessionId`.
+// 2. As a fallback `orca agent list --json`. The CLI has the tab titles but its own ids; a title
+//    is used only when exactly one agent of that kind runs in the workspace, because the match
+//    would otherwise be a guess.
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 
@@ -37,16 +37,16 @@ async function readCliAgentsFromOrca(): Promise<unknown> {
 
 let readCliAgents: () => Promise<unknown> = readCliAgentsFromOrca
 
-/** Nur für Tests: ersetzt den Aufruf der CLI. */
+/** Tests only: replaces the CLI call. */
 export function setCliAgentsReader(reader: () => Promise<unknown>): void {
   readCliAgents = reader
   cache = null
   pending = null
 }
 
-/** Länger wartet `jobs.list` nicht auf die CLI, damit die 2-s-Frist für Phasenwechsel hält. */
+/** `jobs.list` waits no longer for the CLI, so stage changes still show within 2 s. */
 export const CLI_BUDGET_MS = 1500
-/** So lange gilt eine Antwort der CLI; Tab-Titel ändern sich selten. */
+/** How long a CLI answer stays valid; tab titles rarely change. */
 const CLI_CACHE_MS = 30000
 
 let cache: { at: number; agents: CliAgent[] } | null = null
@@ -70,9 +70,9 @@ function fetchCliAgents(): Promise<CliAgent[]> {
 }
 
 /**
- * Agenten aus der CLI. Ein Fehler ergibt eine leere Liste; braucht die CLI länger als
- * `CLI_BUDGET_MS`, gilt die letzte Antwort oder eine leere Liste, und die laufende Abfrage
- * füllt den Zwischenspeicher für den nächsten Durchlauf.
+ * Agents from the CLI. An error yields an empty list; if the CLI takes longer than
+ * `CLI_BUDGET_MS`, the last answer or an empty list applies, and the running call fills the
+ * cache for the next pass.
  */
 export async function cliAgents(): Promise<CliAgent[]> {
   if (cache && Date.now() - cache.at < CLI_CACHE_MS) return cache.agents
@@ -88,7 +88,7 @@ export async function cliAgents(): Promise<CliAgent[]> {
   }
 }
 
-/** Gehört ein CLI-Agent zu diesem Workspace? CLI-IDs sind `<projekt>::<pfad>` oder `folder:<id>`. */
+/** Does a CLI agent belong to this workspace? CLI ids are `<project>::<path>` or `folder:<id>`. */
 export function inWorkspace(agent: CliAgent, workspace: { id: string; path: string }): boolean {
   if (typeof agent.worktreeId !== 'string') return false
   if (agent.worktreeId === workspace.id) return true
@@ -96,7 +96,7 @@ export function inWorkspace(agent: CliAgent, workspace: { id: string; path: stri
   return separator >= 0 && agent.worktreeId.slice(separator + 2) === workspace.path
 }
 
-/** Titel des einzigen CLI-Agenten dieser Art im Workspace, sonst null. */
+/** Title of the only CLI agent of this kind in the workspace, otherwise null. */
 export function uniqueCliTitle(agents: CliAgent[], kind: string | null): string | null {
   if (!kind) return null
   const matches = agents.filter((agent) => agent.agent === kind)

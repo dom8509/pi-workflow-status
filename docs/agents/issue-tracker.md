@@ -1,36 +1,38 @@
-# Issue-Tracking
+# Issue tracking
 
-Übernommene Version: `github-tracking-v1`, schlank für ein Repository mit einem Entwickler.
-Dieses Dokument ist ohne die Vorlage vollständig.
+Adopted version: `github-tracking-v1`, slimmed down for a repository with one developer. This
+document is complete without the template.
 
-## Ort
+## Where
 
-GitHub-Issues in `dom8509/orca-workflow-status`, gelesen und geschrieben mit der `gh` CLI. Es gibt
-keinen separaten Umsetzungsplan; der Umfang steht im Issue. Status lebt nur in GitHub.
+GitHub issues in `dom8509/pi-workflow-status`, read and written with the `gh` CLI. There is no
+separate implementation plan; the scope lives in the issue. Status lives only in GitHub.
 
-## Zuständigkeiten
+## Roles
 
-- Nutzer: gibt Umfang und Plan frei, nimmt ab, genehmigt Merge und Umfangserweiterung.
-- Agent: setzt das Issue im freigegebenen Umfang um und dokumentiert Nachweise im Issue und im PR.
+- User: approves scope and plan, accepts results, approves merges and scope changes.
+- Agent: implements the issue within the approved scope and records evidence in the issue and the
+  pull request.
 
-## Pflichtfelder eines Umsetzungs-Issues
+## Required fields of an implementation issue
 
-Issue Form `.github/ISSUE_TEMPLATE/umsetzung.yml`: Ziel und Kontext, Umfang und Ausschlüsse,
-Akzeptanzkriterien mit ID (`AK1`, `AK2`, …) und Nachweisart je AK, Nutzerabnahme erforderlich
-(ja/nein).
+Issue form `.github/ISSUE_TEMPLATE/implementation.yml`: goal and context, scope and exclusions,
+acceptance criteria with an id (`AC1`, `AC2`, …) and the kind of evidence for each, whether user
+acceptance is required (yes/no).
 
-## Listen lesen
+## Reading lists
 
-Jeder Lesezugriff auf eine Liste liest alle Seiten: `gh api --paginate`, oder `gh issue list`
-mit einem `--limit` über der Gesamtzahl.
+Every read of a list reads all pages: `gh api --paginate`, or `gh issue list` with a `--limit`
+above the total.
 
-## Abschluss
+## Closing
 
-- Commits und PR-Beschreibungen verweisen mit `Refs #<Nr>`. `Closes`, `Fixes` und `Resolves`
-  bleiben draußen, weil GitHub das Issue sonst beim Merge schließt.
-- Die PR-Beschreibung enthält eine Nachweistabelle, eine Zeile je AK, und die Zeile
-  „Ausstehende Abnahmen".
-- Ein Issue schließt erst, wenn jedes AK im Issue nachgewiesen und die verlangte Nutzerabnahme
-  dokumentiert ist. Ein offenes oder unbelegtes AK hält es offen; der Abschlusskommentar nennt es.
-- Ein Handtest steht als Kommentar mit Datum, Build (Commit-SHA), Umgebung (Orca-Version),
-  Prüfer, Ergebnis je AK und Artefakt (Screenshot).
+- Commits and pull request descriptions refer to issues with `Refs #<number>`. `Closes`, `Fixes`
+  and `Resolves` stay out, because GitHub would otherwise close the issue on merge.
+- The pull request description has an evidence table with one row per acceptance criterion and a
+  line "Pending acceptance".
+- An issue closes only when every acceptance criterion is proven in the issue and the required
+  user acceptance is recorded. An open or unproven criterion keeps it open; the closing comment
+  names it.
+- A manual test is a comment with date, build (commit SHA), environment (Orca version), tester,
+  result per criterion and artifact (screenshot).

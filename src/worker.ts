@@ -1,11 +1,11 @@
-// Worker des Plugins: sammelt die Agenten aller lokalen Workspaces, liest zu jedem Pi-Agenten
-// den Workflow-Zustand aus seiner Session-Datei und meldet geänderte Session-Dateien ans Panel.
+// The plugin's worker: collects the agents of all local workspaces, reads each Pi agent's workflow
+// state from its session file and reports changed session files to the panel.
 import type { OrcaWorkerApi } from 'orca/worker'
 import type { AgentState, Job, JobGroup, JobsSnapshot, JobWorkflow } from './protocol'
 import { DEFAULT_SESSIONS_DIR, SessionIndex, expandHome, readWorkflowStack, watchSessions } from './sessions'
 import { cliAgents, inWorkspace, uniqueCliTitle, type CliAgent } from './titles'
 
-/** Wartezeit, mit der mehrere Schreibvorgänge zu einer Meldung gebündelt werden. */
+/** Delay over which several writes are batched into one notification. */
 const CHANGE_DELAY_MS = 500
 
 type AgentRow = {
@@ -33,7 +33,7 @@ function workflowOf(path: string | null): JobWorkflow {
   return readWorkflowStack(path) ?? 'unknown'
 }
 
-/** Titel aus Orcas Session-Historie für diesen Workspace, nach `sessionId`. */
+/** Titles from Orca's session history for this workspace, by `sessionId`. */
 async function historyTitles(orca: OrcaWorkerApi, workspace: WorkspaceRow, agents: AgentRow[]): Promise<Map<string, string>> {
   const titles = new Map<string, string>()
   if (!agents.some((agent) => agent.sessionId)) return titles
@@ -41,14 +41,14 @@ async function historyTitles(orca: OrcaWorkerApi, workspace: WorkspaceRow, agent
     const { sessions } = await orca.host.call('agent.listSessions', { workspaceId: workspace.id, limit: 200 })
     for (const entry of sessions) if (entry.title.trim()) titles.set(entry.sessionId, entry.title)
   } catch {
-    // Ohne Historie bleibt der Ausweg über die CLI.
+    // Without history the CLI fallback remains.
   }
   return titles
 }
 
 /**
- * Schlüssel, unter denen die Historie eine Session nennen kann. Bei Pi liefert `agents.list` den
- * Pfad der Session-Datei, die Historie die Pi-Session-ID aus dem Dateinamen
+ * Keys under which the history may name a session. For Pi, `agents.list` returns the path of the
+ * session file and the history the Pi session id from the file name
  * (`…/2026-11-22T16-36-23-971Z_01a2041d-….jsonl` → `01a2041d-…`).
  */
 function historyKeys(sessionId: string | null | undefined): string[] {
@@ -66,7 +66,7 @@ function historyTitle(agent: AgentRow, history: Map<string, string>): string | u
   return undefined
 }
 
-/** Stabiler Schlüssel eines Jobs, auch ohne Terminal: die sessionId, sonst die Position. */
+/** Stable key of a job, also without a terminal: its sessionId, otherwise its position. */
 function keyOf(workspace: WorkspaceRow, agent: AgentRow, position: number): string {
   return agent.terminalId ?? `${workspace.id}#${agent.sessionId ?? position}`
 }
@@ -74,8 +74,8 @@ function keyOf(workspace: WorkspaceRow, agent: AgentRow, position: number): stri
 function jobsOf(workspace: WorkspaceRow, agents: AgentRow[], index: SessionIndex, titles: Map<string, string>): Job[] {
   const paths = agents.map((agent) => (agent.agent === 'pi' ? index.find(agent.sessionId) : null))
   const pi = agents.filter((agent) => agent.agent === 'pi')
-  // Ohne passende sessionId nur dann die neueste Session des Workspaces, wenn sie eindeutig
-  // zu genau einem Pi-Agenten gehören kann.
+  // Without a matching sessionId, use the workspace's newest session only when it can belong to
+  // exactly one Pi agent.
   const fallback = pi.length === 1 ? index.newestFor(workspace.path) : null
   return agents.map((agent, position) => {
     const key = keyOf(workspace, agent, position)
@@ -92,7 +92,7 @@ function jobsOf(workspace: WorkspaceRow, agents: AgentRow[], index: SessionIndex
 
 type Fetched = { workspace: WorkspaceRow; agents: AgentRow[] } | { workspace: WorkspaceRow; error: string }
 
-/** Titel aller Jobs ohne eigenen Titel: Historie exakt, CLI nur bei Eindeutigkeit. */
+/** Titles for all jobs without their own title: history exactly, CLI only when unambiguous. */
 async function resolveTitles(orca: OrcaWorkerApi, fetched: Fetched[]): Promise<Map<string, string>> {
   const titles = new Map<string, string>()
   let cli: Promise<CliAgent[]> | null = null
@@ -116,7 +116,7 @@ async function resolveTitles(orca: OrcaWorkerApi, fetched: Fetched[]): Promise<M
   return titles
 }
 
-/** So lange wartet `jobs.list` auf Titel; später eintreffende kommen per `jobs.changed`. */
+/** How long `jobs.list` waits for titles; later ones follow with `jobs.changed`. */
 const TITLE_BUDGET_MS = 300
 
 function sameTitles(a: Map<string, string>, b: Map<string, string>): boolean {
@@ -125,7 +125,7 @@ function sameTitles(a: Map<string, string>, b: Map<string, string>): boolean {
   return true
 }
 
-/** Zuletzt bekannte Titel, über Anfragen hinweg; ein neuer Worker beginnt leer. */
+/** Last known titles across requests; a new worker starts empty. */
 export type TitleStore = { titles: Map<string, string>; onLate: () => void }
 
 export async function listJobs(orca: OrcaWorkerApi, store: TitleStore): Promise<JobsSnapshot> {
@@ -134,7 +134,7 @@ export async function listJobs(orca: OrcaWorkerApi, store: TitleStore): Promise<
   const { workspaces } = (await orca.host.call('workspace.list', {})) as { workspaces: WorkspaceRow[] }
   const fetched: Fetched[] = await Promise.all(
     workspaces
-      // Nur dieser Rechner: Sessions anderer Hosts liegen nicht im lokalen Sessions-Ordner.
+      // This computer only: sessions of other hosts are not in the local sessions folder.
       .filter((workspace) => workspace.hostId === null || workspace.hostId === 'local')
       .map(async (workspace): Promise<Fetched> => {
         try {
@@ -182,7 +182,7 @@ export async function listJobs(orca: OrcaWorkerApi, store: TitleStore): Promise<
   return { groups, sessionsDir: dir }
 }
 
-/** Abstand, in dem der Worker einen fehlenden oder ausgefallenen Watcher neu anlegt. */
+/** Interval in which the worker recreates a missing or failed watcher. */
 const RETRY_MS = 1000
 
 let dispose: (() => void) | null = null
@@ -191,7 +191,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   let stopWatching: (() => void) | null = null
   let watchedDir: string | null = null
   let retry: ReturnType<typeof setTimeout> | null = null
-  /** Es gab eine Zeit ohne Watcher; Sessions aus dieser Lücke meldet der neue Watcher sofort. */
+  /** There was a time without a watcher; the new watcher reports sessions from that gap at once. */
   let gap = false
   const changed = () => orca.panels.post('jobs.changed', { at: Date.now() })
   const store: TitleStore = { titles: new Map(), onLate: changed }
@@ -213,7 +213,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       stopWatching = null
       watchedDir = null
       gap = true
-      orca.log(`Watcher für ${dir} ausgefallen`)
+      orca.log(`Watcher for ${dir} failed`)
       scheduleRetry()
     })
     if (!stopWatching) {

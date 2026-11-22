@@ -1,4 +1,4 @@
-// Ansichtsmodell und HTML des Panels, ohne DOM: dieselben Funktionen laufen im Panel und im Test.
+// View model and HTML of the panel, without a DOM: the same functions run in the panel and in tests.
 import type { WorkflowLevel } from './parse'
 import type { AgentState, Job, JobsSnapshot, JobWorkflow } from './protocol'
 
@@ -8,7 +8,7 @@ export type ActivityItem = {
   workspace: string
   state: AgentState
   stateStartedAt: number
-  /** Kurzform für die Liste, zum Beispiel `Coding · plan › ResultCheck · check`. */
+  /** Short form for the list, for example `Coding · plan › ResultCheck · check`. */
   summary: string
   job: Job
 }
@@ -18,7 +18,7 @@ export type StageStatus = 'done' | 'current' | 'pending'
 export type Pipeline = {
   workflow: string
   stages: { id: string; description: string | null; status: StageStatus; next: boolean }[]
-  /** Workflow, der über der aktuellen Phase läuft, zum Beispiel ResultCheck. */
+  /** Workflow running above the current stage, for example ResultCheck. */
   nested: Pipeline | null
 }
 
@@ -31,7 +31,7 @@ export function summaryOf(workflow: JobWorkflow): string {
   return workflow.map((level) => `${level.workflow} · ${level.stage}`).join(' › ')
 }
 
-/** Alle Jobs, laufende zuerst, innerhalb dessen die zuletzt geänderten zuerst. */
+/** All jobs, running ones first, then the most recently changed first. */
 export function activityOf(snapshot: JobsSnapshot): ActivityItem[] {
   return snapshot.groups
     .flatMap((group) =>
@@ -52,21 +52,21 @@ function hasActiveWorkflow(item: ActivityItem): boolean {
   return Array.isArray(item.job.workflow) && item.job.workflow.length > 0
 }
 
-/** Mit Filter nur Jobs, die gerade einen Workflow ausführen. */
+/** With the filter on, only jobs that are running a workflow. */
 export function visibleItems(items: ActivityItem[], workflowsOnly: boolean): ActivityItem[] {
   return workflowsOnly ? items.filter(hasActiveWorkflow) : items
 }
 
-/** Die bisherige Auswahl, solange es den Job gibt; sonst der erste Job mit aktivem Workflow. */
+/** The current selection while that job exists; otherwise the first job with an active workflow. */
 export function selectJob(items: ActivityItem[], current: string | null): string | null {
   if (current && items.some((item) => item.key === current)) return current
   return (items.find(hasActiveWorkflow) ?? items[0])?.key ?? null
 }
 
 /**
- * Pipeline eines Workflow-Stapels. Eine Phase gilt als erledigt, wenn sie in der Definition vor der
- * aktuellen steht; nach einem Rücksprung (zum Beispiel von `verify` zurück nach `implement`) gelten
- * die späteren Phasen wieder als offen.
+ * Pipeline of a workflow stack. A stage counts as done when it comes before the current one in the
+ * definition; after going back (for example from `verify` to `implement`) the later stages count
+ * as pending again.
  */
 export function pipelineOf(workflow: JobWorkflow): Pipeline | null {
   if (!Array.isArray(workflow) || workflow.length === 0) return null
@@ -75,8 +75,8 @@ export function pipelineOf(workflow: JobWorkflow): Pipeline | null {
 
 function levelPipeline(levels: WorkflowLevel[], depth: number): Pipeline {
   const level = levels[depth]
-  // Eine Phase, die die Definition nicht kennt, hängt als aktuelle Phase hinten an, damit sie und
-  // ein darüberliegender Prüf-Workflow sichtbar bleiben.
+  // A stage the definition does not list is appended as the current stage, so it and a check
+  // workflow above it stay visible.
   const known = level.stages.some((stage) => stage.id === level.stage)
   const stages = known ? level.stages : [...level.stages, { id: level.stage, description: null }]
   const current = stages.findIndex((stage) => stage.id === level.stage)
@@ -85,7 +85,7 @@ function levelPipeline(levels: WorkflowLevel[], depth: number): Pipeline {
     stages: stages.map((stage, index) => ({
       id: stage.id,
       description: stage.description,
-      // Bei unbekannter Phase ist offen, was davor erledigt ist; die Definition bleibt dann offen.
+      // With an unknown stage it is unclear what is done, so the defined stages stay pending.
       status: index === current ? 'current' : known && index < current ? 'done' : 'pending',
       next: stage.id === level.pendingStage
     })),
@@ -93,7 +93,7 @@ function levelPipeline(levels: WorkflowLevel[], depth: number): Pipeline {
   }
 }
 
-/** Farbtöne der bekannten Workflows; Coding blau, Package violett, ResultCheck türkis. */
+/** Hues of known workflows: Coding blue, Package violet, ResultCheck teal. */
 const KNOWN_HUES = new Map<string, number>([
   ['Coding', 215],
   ['Package', 270],
@@ -103,7 +103,7 @@ const KNOWN_HUES = new Map<string, number>([
   ['Extraction', 95]
 ])
 
-/** Fester Farbton (0–359) eines Workflows; unbekannte Namen bekommen einen aus ihrem Namen. */
+/** Fixed hue (0–359) of a workflow; unknown names get one derived from the name. */
 export function workflowHue(name: string): number {
   const known = KNOWN_HUES.get(name)
   if (known !== undefined) return known
@@ -128,7 +128,7 @@ const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ['second', 1000]
 ]
 
-/** "3m ago"; genauer als eine Minute muss die Liste nicht sein. */
+/** "3m ago"; the list does not need more precision than a minute. */
 export function ago(at: number, now: number): string {
   const diff = Math.max(0, now - at)
   if (diff < 60_000) return 'just now'
@@ -165,7 +165,7 @@ function renderTimeline(pipeline: Pipeline): string {
   return `<ol class="timeline">${stages}</ol>`
 }
 
-/** Verschachtelte Pipeline: Überschrift und Zeitleiste gemeinsam. */
+/** Nested pipeline: heading and timeline together. */
 function renderPipeline(pipeline: Pipeline): string {
   return `<div class="pipeline">${pipelineHeader(pipeline)}${renderTimeline(pipeline)}</div>`
 }
@@ -175,7 +175,7 @@ function pipelineHeader(pipeline: Pipeline): string {
 <p class="route">${pipeline.stages.map((stage) => escapeHtml(stage.id)).join(' → ')}</p>`
 }
 
-/** Die oberste Pipeline: Überschrift fest, Zeitleiste im eigenen Scrollbereich. */
+/** Top pipeline: fixed heading, timeline in its own scroll area. */
 function renderDetail(pipeline: Pipeline): string {
   return `<section class="detail">
 <header class="section-head">${pipelineHeader(pipeline)}</header>
@@ -201,7 +201,7 @@ export type PanelModel = {
   selected: string | null
   error: string | null
   now: number
-  /** Nur Jobs zeigen, die einen Workflow ausführen. */
+  /** Show only jobs that are running a workflow. */
   workflowsOnly: boolean
 }
 

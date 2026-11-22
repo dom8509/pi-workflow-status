@@ -1,9 +1,9 @@
-// Prüft die Auswertung der Pi-Session-Datei: Workflow-Stapel aus den `workflow-state`-Einträgen.
-// Die Zeilen folgen der Form echter Sessions unter ~/.pi/agent/sessions (gekürzt).
+// Tests reading a Pi session file: the workflow stack from its `workflow-state` entries.
+// The lines follow the shape of real sessions under ~/.pi/agent/sessions (shortened).
 import { assert, test } from 'orca/testing'
 import { parseWorkflowStack as parseFull, type WorkflowLevel } from './parse'
 
-/** Die meisten Tests prüfen nur Workflow und Phase; die Phasenliste prüft ein eigener Test. */
+/** Most tests check only workflow and stage; a separate test checks the stage list. */
 function parseWorkflowStack(text: string): Omit<WorkflowLevel, 'stages'>[] {
   return parseFull(text).map(({ stages: _stages, ...rest }) => rest)
 }
@@ -29,12 +29,12 @@ function msg(id: string, parentId: string | null): string {
 }
 const header = JSON.stringify({ type: 'session', version: 3, id: 'sess', cwd: '/tmp/x' })
 
-test('ohne Workflow-Einträge ist der Stapel leer', () => {
+test('without workflow entries the stack is empty', () => {
   const text = [header, msg('a', null), msg('b', 'a')].join('\n')
   assert.deepEqual(parseWorkflowStack(text), [])
 })
 
-test('aktivierter Workflow mit Übergang zeigt die letzte Phase der Route', () => {
+test('an activated workflow with a transition shows the last stage of its route', () => {
   const text = [
     header,
     msg('a', null),
@@ -47,7 +47,7 @@ test('aktivierter Workflow mit Übergang zeigt die letzte Phase der Route', () =
   ])
 })
 
-test('push legt einen verschachtelten Workflow auf, exited nimmt ihn wieder ab', () => {
+test('push adds a nested workflow, exited removes it again', () => {
   const base = [
     header,
     state('a', null, { kind: 'activated', workflow: coding, route: ['understand'], mode: 'replace' }),
@@ -64,7 +64,7 @@ test('push legt einen verschachtelten Workflow auf, exited nimmt ihn wieder ab',
   ])
 })
 
-test('replace ersetzt den ganzen Stapel', () => {
+test('replace replaces the whole stack', () => {
   const text = [
     header,
     state('a', null, { kind: 'activated', workflow: coding, route: ['understand'], mode: 'replace' }),
@@ -76,7 +76,7 @@ test('replace ersetzt den ganzen Stapel', () => {
   ])
 })
 
-test('nach exited des letzten Workflows ist der Stapel leer', () => {
+test('after the last workflow exits the stack is empty', () => {
   const text = [
     header,
     state('a', null, { kind: 'activated', workflow: coding, route: ['understand'], mode: 'replace' }),
@@ -85,8 +85,8 @@ test('nach exited des letzten Workflows ist der Stapel leer', () => {
   assert.deepEqual(parseWorkflowStack(text), [])
 })
 
-test('nur der aktuelle Zweig zählt (AK3)', () => {
-  // c liegt auf einem verlassenen Zweig; der letzte Eintrag e hängt an b.
+test('only the current branch counts', () => {
+  // c is on an abandoned branch; the last entry e hangs off b.
   const text = [
     header,
     state('a', null, { kind: 'activated', workflow: coding, route: ['understand'], mode: 'replace' }),
@@ -100,20 +100,20 @@ test('nur der aktuelle Zweig zählt (AK3)', () => {
   ])
 })
 
-test('kaputte und leere Zeilen werden übersprungen (AK6)', () => {
+test('broken and empty lines are skipped', () => {
   const text = [
     header,
-    '{"type":"custom", kaputt',
+    '{"type":"custom", broken',
     '',
     state('a', null, { kind: 'activated', workflow: coding, route: ['understand'], mode: 'replace' }),
-    'nicht einmal JSON'
+    'not even JSON'
   ].join('\n')
   assert.deepEqual(parseWorkflowStack(text), [
     { workflow: 'Coding', stage: 'understand', stageNumber: 1, stageCount: 6 }
   ])
 })
 
-test('ein Übergang mit Prüf-Workflow wartet und greift erst bei exited mit allow: true', () => {
+test('a transition through a check workflow waits and applies only on exited with allow: true', () => {
   const base = [
     header,
     state('a', null, { kind: 'activated', workflow: coding, route: ['understand'], mode: 'replace' }),
@@ -140,7 +140,7 @@ test('ein Übergang mit Prüf-Workflow wartet und greift erst bei exited mit all
   ])
 })
 
-test('eine Phase, die der Workflow nicht kennt, hat keine Nummer', () => {
+test('a stage the workflow does not define has no number', () => {
   const text = [
     header,
     state('a', null, { kind: 'activated', workflow: { id: 'Custom' }, route: ['x'], mode: 'replace' })
@@ -150,7 +150,7 @@ test('eine Phase, die der Workflow nicht kennt, hat keine Nummer', () => {
   ])
 })
 
-test('jede Ebene trägt die Phasen ihrer Definition mit Beschreibung', () => {
+test('each level carries the stages of its definition with descriptions', () => {
   const text = [
     header,
     state('a', null, {

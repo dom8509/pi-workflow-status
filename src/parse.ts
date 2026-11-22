@@ -1,25 +1,25 @@
-// Liest den Workflow-Zustand eines Pi-Agenten aus seiner Session-Datei (JSONL).
+// Reads a Pi agent's workflow state from its session file (JSONL).
 //
-// Pi-Agent-Suite schreibt dafür Einträge `{ type: 'custom', customType: 'workflow-state', data }`:
-//   activated    — `data.workflow` (Definition), `data.route` (Phasenfolge), `data.mode`
-//                  ('replace' ersetzt den Stapel, 'push' legt einen verschachtelten Workflow auf)
-//   transitioned — `data.route` ist die neue Phasenfolge des obersten Workflows
-//   exited       — nimmt den obersten Workflow ab
-// Ein Übergang mit Prüf-Workflow (`workflow_transition` mit Attribut `workflow`) schreibt
-// `activated` mit `mode: 'push'` und `pendingTransition.stageId`: der darunterliegende Workflow
-// wartet und rückt erst bei `exited` mit `allow: true` in diese Phase vor.
-// Eine Session ist ein Baum (`id`/`parentId`); es zählt nur die Kette vom letzten Eintrag
-// zur Wurzel, also der Zweig, auf dem die Session gerade steht.
+// Pi Agent Suite writes entries `{ type: 'custom', customType: 'workflow-state', data }`:
+//   activated    — `data.workflow` (definition), `data.route` (stage sequence), `data.mode`
+//                  ('replace' replaces the stack, 'push' adds a nested workflow)
+//   transitioned — `data.route` is the new stage sequence of the top workflow
+//   exited       — removes the top workflow
+// A transition through a check workflow (`workflow_transition` with a `workflow` attribute)
+// writes `activated` with `mode: 'push'` and `pendingTransition.stageId`: the workflow below waits
+// and moves to that stage only on `exited` with `allow: true`.
+// A session is a tree (`id`/`parentId`); only the chain from the last entry to the root counts,
+// that is the branch the session is currently on.
 
 export type WorkflowLevel = {
   workflow: string
   stage: string
-  /** 1-basierte Position der Phase in der Definition, null wenn unbekannt. */
+  /** 1-based position of the stage in the definition, null when unknown. */
   stageNumber: number | null
   stageCount: number | null
-  /** Phase, in die dieser Workflow wechselt, sobald der darüberliegende Prüf-Workflow sie freigibt. */
+  /** Stage this workflow moves to once the check workflow above allows it. */
   pendingStage?: string
-  /** Phasen der Definition in ihrer Reihenfolge; leer, wenn die Definition keine nennt. */
+  /** Stages of the definition in order; empty when the definition lists none. */
   stages: StageInfo[]
 }
 
@@ -31,7 +31,7 @@ type Frame = {
   workflow: string
   stages: StageInfo[] | null
   route: string[]
-  /** Ziel des Übergangs, auf dessen Freigabe der darunterliegende Workflow wartet. */
+  /** Target of the transition the workflow below is waiting to have allowed. */
   releases?: string
 }
 
@@ -65,7 +65,7 @@ function parseLines(text: string): Entry[] {
   return entries
 }
 
-/** Einträge des aktuellen Zweigs, von der Wurzel zum letzten Eintrag. */
+/** Entries of the current branch, from the root to the last entry. */
 function currentBranch(entries: Entry[]): Entry[] {
   if (entries.length === 0) return []
   const byId = new Map(entries.map((entry) => [entry.id, entry]))

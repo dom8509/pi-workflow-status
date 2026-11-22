@@ -1,15 +1,14 @@
-// Aussehen des Panels nach dem Entwurf "Autonomous pipeline": Activity-Liste, darunter eine
-// vertikale Zeitleiste der Phasen. Flächen, Text und Rahmen kommen aus den `--orca-*`-Variablen;
-// Bedeutung trägt eine eigene Palette (O12-1) mit einer Variante je Theme, die Orca über die
-// Klasse `light`/`dark` auf <html> wählt: grün erledigt, blau aktuell oder läuft, bernstein wartet
-// oder blockiert, und je Workflow ein fester Farbton `--hue`. Die Seite scrollt nicht; Liste und
-// Pipeline scrollen je für sich unter festen Überschriften.
+// Panel styles: an Activity list above a vertical timeline of stages. Surfaces, text and borders
+// come from the `--orca-*` variables; meaning comes from an own palette with one variant per
+// theme, chosen through the `light`/`dark` class Orca sets on <html>: green done, blue current or
+// working, amber waiting or blocked, and a fixed hue `--hue` per workflow. The page does not
+// scroll; the list and the pipeline each scroll on their own below fixed headings.
 const tint = (variable: string, percent: number) => `color-mix(in srgb, var(${variable}) ${percent}%, transparent)`
 
 export const PANEL_CSS = `
 :root {
   color-scheme: light dark;
-  /* Kontrast ≥ 4,5:1 für kleinen Text auf Weiß, Hover- und Auswahlfläche samt Tönung, für jeden Farbton gerechnet. */
+  /* Contrast ≥ 4.5:1 for small text on white, hover and selected surfaces including tints, computed for every hue. */
   --c-done: hsl(142 70% 24%);
   --c-active: hsl(214 90% 38%);
   --c-wait: hsl(30 95% 27%);
@@ -51,7 +50,7 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; display: flex; align-items: c
 .callout.danger { border-color: var(--orca-destructive); color: var(--orca-destructive); background: ${tint('--orca-destructive', 8)}; }
 .callout.warning { color: var(--orca-muted-foreground); }
 
-/* Zwei Bereiche, die sich die Höhe teilen; jeder scrollt für sich. */
+/* Two areas share the height; each scrolls on its own. */
 .activity, .detail { display: flex; flex-direction: column; min-height: 0; gap: 8px; }
 .activity { flex: 0 1 auto; max-height: 45%; }
 .detail { flex: 1 1 0; border-top: 1px solid var(--orca-border); padding-top: 10px; }

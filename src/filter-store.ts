@@ -1,14 +1,14 @@
-// Zustand des Filters „Workflows only“ samt Speichern. Höchstens ein Schreibvorgang läuft
-// gleichzeitig; der jeweils zuletzt gewählte Wert wird danach geschrieben. Dadurch kann keine
-// überholte Rückmeldung die Anzeige vom gespeicherten Wert trennen.
+// State of the "Workflows only" filter, including saving it. At most one write runs at a time;
+// the latest choice is written afterwards. No outdated response can therefore separate the
+// display from the saved value.
 
 export const SAVE_ERROR = 'Could not save the filter'
 
 export class FilterStore {
-  /** Was das Panel anzeigt. */
+  /** What the panel shows. */
   shown: boolean
   error: string | null = null
-  /** Zuletzt bestätigt gespeicherter Wert. */
+  /** Last value confirmed as saved. */
   private saved: boolean
   private writing = false
   private chosen = false
@@ -22,7 +22,7 @@ export class FilterStore {
     this.saved = initial
   }
 
-  /** Der gespeicherte Wert aus dem Plugin-Speicher; eine Wahl des Nutzers hat Vorrang. */
+  /** The value from plugin storage; a choice the user already made takes precedence. */
   loaded(value: boolean): void {
     this.saved = value
     if (this.chosen) return

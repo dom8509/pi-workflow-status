@@ -1,4 +1,4 @@
-// Prüft das Ansichtsmodell des HTML-Panels: Activity-Liste, Auswahl und Pipeline.
+// Tests the HTML panel's view model: Activity list, selection and pipeline.
 import { assert, test } from 'orca/testing'
 import type { JobsSnapshot } from './protocol'
 import { activityOf, pipelineOf, renderPanel, selectJob, visibleItems, workflowHue } from './view'
@@ -20,7 +20,7 @@ const snapshot: JobsSnapshot = {
         { key: 'a1', title: 'Old claude', agent: 'claude', state: 'done', stateStartedAt: 100, workflow: 'none' },
         {
           key: 'a2',
-          title: 'Plugin <bauen>',
+          title: 'Plugin <build>',
           agent: 'pi',
           state: 'working',
           stateStartedAt: 50,
@@ -45,11 +45,11 @@ const snapshot: JobsSnapshot = {
       name: 'hearturchin',
       jobs: [{ key: 'b1', title: 'Idle pi', agent: 'pi', state: 'done', stateStartedAt: 300, workflow: [] }]
     },
-    { workspaceId: 'ws-c', name: 'broken', jobs: [], error: 'kaputt' }
+    { workspaceId: 'ws-c', name: 'broken', jobs: [], error: 'broken' }
   ]
 }
 
-test('die Activity-Liste zeigt laufende Jobs zuerst, dann die zuletzt geänderten', () => {
+test('the Activity list shows running jobs first, then the most recently changed', () => {
   assert.deepEqual(
     activityOf(snapshot).map((item) => [item.key, item.workspace, item.summary]),
     [
@@ -60,15 +60,15 @@ test('die Activity-Liste zeigt laufende Jobs zuerst, dann die zuletzt geänderte
   )
 })
 
-test('ohne gültige Auswahl ist der erste Job mit aktivem Workflow ausgewählt (O9-1)', () => {
+test('without a valid selection the first job with an active workflow is selected', () => {
   const items = activityOf(snapshot)
   assert.equal(selectJob(items, null), 'a2')
-  assert.equal(selectJob(items, 'gibt-es-nicht'), 'a2')
+  assert.equal(selectJob(items, 'does-not-exist'), 'a2')
   assert.equal(selectJob(items, 'b1'), 'b1')
   assert.equal(selectJob([], 'b1'), null)
 })
 
-test('die Pipeline markiert erledigte, aktuelle und offene Phasen und schachtelt den Prüf-Workflow', () => {
+test('the pipeline marks done, current and pending stages and nests the check workflow', () => {
   const job = snapshot.groups[0].jobs[1]
   assert.deepEqual(pipelineOf(job.workflow), {
     workflow: 'Coding',
@@ -91,35 +91,35 @@ test('die Pipeline markiert erledigte, aktuelle und offene Phasen und schachtelt
   assert.equal(pipelineOf([]), null)
 })
 
-test('das HTML maskiert Titel und zeigt Liste und Pipeline des ausgewählten Jobs', () => {
+test('the HTML escapes titles and shows the list and the selected job\'s pipeline', () => {
   const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 110_000, workflowsOnly: false })
-  assert.ok(html.includes('Plugin &lt;bauen&gt;'), 'Titel nicht maskiert')
-  assert.ok(!html.includes('<bauen>'))
+  assert.ok(html.includes('Plugin &lt;build&gt;'), 'title not escaped')
+  assert.ok(!html.includes('<build>'))
   assert.ok(html.includes('data-key="a2"') && html.includes('data-key="b1"'))
-  assert.ok(/class="job selected"[^>]*data-key="a2"/.test(html), 'Auswahl fehlt')
-  assert.ok(html.includes('understand → specify → plan → implement'), 'Phasenfolge fehlt')
-  assert.ok(/class="stage current"[^]*?plan/.test(html), 'aktuelle Phase fehlt')
-  assert.ok(html.includes('ResultCheck'), 'Prüf-Workflow fehlt')
-  assert.ok(html.includes('kaputt'), 'Fehler eines Workspaces fehlt')
+  assert.ok(/class="job selected"[^>]*data-key="a2"/.test(html), 'selection missing')
+  assert.ok(html.includes('understand → specify → plan → implement'), 'stage sequence missing')
+  assert.ok(/class="stage current"[^]*?plan/.test(html), 'current stage missing')
+  assert.ok(html.includes('ResultCheck'), 'check workflow missing')
+  assert.ok(html.includes('broken'), 'workspace error missing')
   assert.ok(html.includes('working'))
 })
 
-test('ohne Jobs und bei einem Fehler zeigt das Panel einen Hinweis', () => {
+test('without jobs and on an error the panel shows a notice', () => {
   const none = renderPanel({ snapshot: { sessionsDir: '/s', groups: [] }, selected: null, error: null, now: 0, workflowsOnly: true })
   assert.ok(none.includes('No agents'))
-  // Auch ohne Jobs bleiben Zähler und Schalter bedienbar (AK9).
+  // Count and switch stay usable even without jobs.
   assert.ok(none.includes('<span class="count">0/0</span>'))
   assert.ok(none.includes('data-filter="workflows-only" checked'))
   assert.ok(renderPanel({ snapshot: null, selected: null, error: 'worker down', now: 0, workflowsOnly: false }).includes('worker down'))
   assert.ok(renderPanel({ snapshot: null, selected: null, error: null, now: 0, workflowsOnly: false }).includes('Loading'))
 })
 
-test('ein Job ohne aktiven Workflow zeigt statt einer Pipeline einen Hinweis', () => {
+test('a job without an active workflow shows a notice instead of a pipeline', () => {
   const html = renderPanel({ snapshot, selected: 'a1', error: null, now: 0, workflowsOnly: false })
   assert.ok(html.includes('has no Pi workflow'))
 })
 
-test('eine aktuelle Phase außerhalb der Definition bleibt mit ihrem Prüf-Workflow sichtbar', () => {
+test('a current stage outside the definition stays visible with its check workflow', () => {
   const pipeline = pipelineOf([
     { workflow: 'Custom', stage: 'extra', stageNumber: null, stageCount: null, stages: [{ id: 'a', description: 'A' }] },
     { workflow: 'ResultCheck', stage: 'check', stageNumber: 1, stageCount: 1, stages: [{ id: 'check', description: null }] }
@@ -134,41 +134,41 @@ test('eine aktuelle Phase außerhalb der Definition bleibt mit ihrem Prüf-Workf
   assert.equal(pipeline?.nested?.workflow, 'ResultCheck')
 })
 
-test('ein Job mit Workflow zeigt je Ebene einen Chip, einer ohne einen grauen Hinweis (AK8)', () => {
+test('a job with a workflow shows one chip per level, one without shows a grey notice', () => {
   const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 0, workflowsOnly: false })
   assert.ok(
     /<span class="chips"><span class="chip" style="--hue: 215">Coding · plan<\/span><span class="chip" style="--hue: 175">ResultCheck · check<\/span><\/span>/.test(html),
-    'Chips fehlen'
+    'chips missing'
   )
   assert.ok(html.includes('<span class="no-workflow">no workflow</span>'))
   assert.ok(html.includes('<span class="no-workflow">no active workflow</span>'))
 })
 
-test('der Filter blendet Jobs ohne aktiven Workflow aus und zählt sichtbare Jobs (AK9)', () => {
+test('the filter hides jobs without an active workflow and counts visible jobs', () => {
   const items = activityOf(snapshot)
   assert.deepEqual(visibleItems(items, true).map((item) => item.key), ['a2'])
   assert.deepEqual(visibleItems(items, false).map((item) => item.key), ['a2', 'b1', 'a1'])
   const html = renderPanel({ snapshot, selected: 'b1', error: null, now: 0, workflowsOnly: true })
-  assert.ok(html.includes('<span class="count">1/3</span>'), 'Zähler fehlt')
-  assert.ok(/<input type="checkbox" data-filter="workflows-only" checked>/.test(html), 'Schalter fehlt')
-  assert.ok(!html.includes('data-key="b1"'), 'ausgeblendeter Job sichtbar')
-  assert.ok(/class="job selected"[^>]*data-key="a2"/.test(html), 'Auswahl springt nicht auf sichtbaren Job')
+  assert.ok(html.includes('<span class="count">1/3</span>'), 'count missing')
+  assert.ok(/<input type="checkbox" data-filter="workflows-only" checked>/.test(html), 'switch missing')
+  assert.ok(!html.includes('data-key="b1"'), 'hidden job visible')
+  assert.ok(/class="job selected"[^>]*data-key="a2"/.test(html), 'selection does not move to a visible job')
 })
 
-test('ist kein Job mit Workflow übrig, nennt das Panel das und lässt den Filter bedienbar', () => {
+test('with no job running a workflow the panel says so and keeps the filter usable', () => {
   const idle: JobsSnapshot = { sessionsDir: '/s', groups: [snapshot.groups[1]] }
   const html = renderPanel({ snapshot: idle, selected: null, error: null, now: 0, workflowsOnly: true })
   assert.ok(html.includes('No job is running a workflow right now.'))
   assert.ok(html.includes('data-filter="workflows-only"'))
 })
 
-test('Liste und Pipeline liegen in eigenen Scrollbereichen unter festen Überschriften (AK10)', () => {
+test('list and pipeline sit in their own scroll areas below fixed headings', () => {
   const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 0, workflowsOnly: false })
-  assert.ok(/<section class="activity">\s*<header[^]*<\/header>\s*<ul class="jobs scroll">/.test(html), 'Activity-Bereich')
-  assert.ok(/<section class="detail">\s*<header[^]*Coding[^]*<\/header>\s*<div class="scroll">/.test(html), 'Pipeline-Bereich')
+  assert.ok(/<section class="activity">\s*<header[^]*<\/header>\s*<ul class="jobs scroll">/.test(html), 'Activity area')
+  assert.ok(/<section class="detail">\s*<header[^]*Coding[^]*<\/header>\s*<div class="scroll">/.test(html), 'pipeline area')
 })
 
-test('jeder Workflow hat eine feste Farbe: bekannte nach Tabelle, andere aus dem Namen (AK11)', () => {
+test('every workflow has a fixed colour: known ones from a table, others from the name', () => {
   assert.equal(workflowHue('Coding'), 215)
   assert.equal(workflowHue('Package'), 270)
   assert.equal(workflowHue('ResultCheck'), 175)
@@ -178,13 +178,13 @@ test('jeder Workflow hat eine feste Farbe: bekannte nach Tabelle, andere aus dem
   assert.notEqual(workflowHue('MyCustomFlow'), workflowHue('OtherFlow'))
 })
 
-test('die Pipeline-Überschrift trägt die Farbe ihres Workflows (AK11)', () => {
+test('the pipeline heading carries the colour of its workflow', () => {
   const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 0, workflowsOnly: false })
   assert.ok(html.includes('<h2 style="--hue: 215"><span class="hue-dot"></span>Coding</h2>'))
   assert.ok(html.includes('<h2 style="--hue: 175"><span class="hue-dot"></span>ResultCheck</h2>'))
 })
 
-test('Namen wie Objekt-Eigenschaften ergeben trotzdem einen Farbton 0–359', () => {
+test('names like object properties still yield a hue 0–359', () => {
   for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
     const hue = workflowHue(name)
     assert.ok(Number.isInteger(hue) && hue >= 0 && hue < 360, `${name} → ${String(hue)}`)

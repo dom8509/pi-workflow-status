@@ -1,5 +1,5 @@
-// Minimale Typen der Node-Module, die der Worker nutzt. Das Plugin hat keine npm-Abhängigkeiten,
-// also auch kein @types/node.
+// Minimal types for the Node modules the worker uses. The plugin has no npm dependencies,
+// so no @types/node either.
 declare module 'node:fs' {
   export type Dirent = { name: string; isDirectory(): boolean; isFile(): boolean }
   export type Stats = { mtimeMs: number; isFile(): boolean }
