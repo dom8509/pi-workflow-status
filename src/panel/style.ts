@@ -9,11 +9,11 @@ const tint = (variable: string, percent: number) => `color-mix(in srgb, var(${va
 export const PANEL_CSS = `
 :root {
   color-scheme: light dark;
-  /* Kontrast ≥ 4,5:1 für kleinen Text auf Weiß samt Tönung, für jeden Farbton geprüft. */
+  /* Kontrast ≥ 4,5:1 für kleinen Text auf Weiß, Hover- und Auswahlfläche samt Tönung, für jeden Farbton gerechnet. */
   --c-done: hsl(142 70% 24%);
   --c-active: hsl(214 90% 38%);
-  --c-wait: hsl(30 95% 30%);
-  --chip-l: 26%;
+  --c-wait: hsl(30 95% 27%);
+  --chip-l: 24%;
   --chip-bg: 0.13;
 }
 html.dark {
