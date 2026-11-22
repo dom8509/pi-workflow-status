@@ -2,7 +2,9 @@
 
 Ein Orca-Plugin, das in der rechten Sidebar für jeden Agenten aller lokalen Workspaces anzeigt,
 in welchem Pi-Workflow und in welcher Phase er steht. Oben steht die Liste „Activity“ mit allen
-Jobs, laufende zuerst; darunter die Pipeline des ausgewählten Jobs als Zeitleiste mit erledigten,
+Jobs, laufende zuerst; jeder Job mit Workflow trägt je Ebene einen Chip wie `Coding · implement`.
+Der Schalter „Workflows only“ (Vorgabe an, gespeichert über `storage:own`) blendet Jobs ohne
+aktiven Workflow aus. Liste und Pipeline scrollen getrennt; darunter die Pipeline des ausgewählten Jobs als Zeitleiste mit erledigten,
 aktueller und offenen Phasen samt ihrer Beschreibung. Ein Prüf-Workflow wie ResultCheck erscheint
 eingerückt unter der aktuellen Phase.
 

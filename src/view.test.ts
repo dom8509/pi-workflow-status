@@ -1,7 +1,7 @@
 // Prüft das Ansichtsmodell des HTML-Panels: Activity-Liste, Auswahl und Pipeline.
 import { assert, test } from 'orca/testing'
 import type { JobsSnapshot } from './protocol'
-import { activityOf, pipelineOf, renderPanel, selectJob } from './view'
+import { activityOf, pipelineOf, renderPanel, selectJob, visibleItems } from './view'
 
 const codingStages = [
   { id: 'understand', description: 'Collect the facts' },
@@ -92,7 +92,7 @@ test('die Pipeline markiert erledigte, aktuelle und offene Phasen und schachtelt
 })
 
 test('das HTML maskiert Titel und zeigt Liste und Pipeline des ausgewählten Jobs', () => {
-  const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 110_000 })
+  const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 110_000, workflowsOnly: false })
   assert.ok(html.includes('Plugin &lt;bauen&gt;'), 'Titel nicht maskiert')
   assert.ok(!html.includes('<bauen>'))
   assert.ok(html.includes('data-key="a2"') && html.includes('data-key="b1"'))
@@ -105,13 +105,13 @@ test('das HTML maskiert Titel und zeigt Liste und Pipeline des ausgewählten Job
 })
 
 test('ohne Jobs und bei einem Fehler zeigt das Panel einen Hinweis', () => {
-  assert.ok(renderPanel({ snapshot: { sessionsDir: '/s', groups: [] }, selected: null, error: null, now: 0 }).includes('No agents'))
-  assert.ok(renderPanel({ snapshot: null, selected: null, error: 'worker down', now: 0 }).includes('worker down'))
-  assert.ok(renderPanel({ snapshot: null, selected: null, error: null, now: 0 }).includes('Loading'))
+  assert.ok(renderPanel({ snapshot: { sessionsDir: '/s', groups: [] }, selected: null, error: null, now: 0, workflowsOnly: false }).includes('No agents'))
+  assert.ok(renderPanel({ snapshot: null, selected: null, error: 'worker down', now: 0, workflowsOnly: false }).includes('worker down'))
+  assert.ok(renderPanel({ snapshot: null, selected: null, error: null, now: 0, workflowsOnly: false }).includes('Loading'))
 })
 
 test('ein Job ohne aktiven Workflow zeigt statt einer Pipeline einen Hinweis', () => {
-  const html = renderPanel({ snapshot, selected: 'a1', error: null, now: 0 })
+  const html = renderPanel({ snapshot, selected: 'a1', error: null, now: 0, workflowsOnly: false })
   assert.ok(html.includes('has no Pi workflow'))
 })
 
@@ -130,7 +130,36 @@ test('eine aktuelle Phase außerhalb der Definition bleibt mit ihrem Prüf-Workf
   assert.equal(pipeline?.nested?.workflow, 'ResultCheck')
 })
 
-test('die Zusammenfassung steht in einer eigenen, umbrechenden Zeile je Job (AK1)', () => {
-  const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 0 })
-  assert.ok(/<span class="job-summary active">Coding · plan › ResultCheck · check<\/span>\s*<span class="job-meta">/.test(html))
+test('ein Job mit Workflow zeigt je Ebene einen Chip, einer ohne einen grauen Hinweis (AK8)', () => {
+  const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 0, workflowsOnly: false })
+  assert.ok(
+    /<span class="chips"><span class="chip">Coding · plan<\/span><span class="chip">ResultCheck · check<\/span><\/span>/.test(html),
+    'Chips fehlen'
+  )
+  assert.ok(html.includes('<span class="no-workflow">no workflow</span>'))
+  assert.ok(html.includes('<span class="no-workflow">no active workflow</span>'))
+})
+
+test('der Filter blendet Jobs ohne aktiven Workflow aus und zählt sichtbare Jobs (AK9)', () => {
+  const items = activityOf(snapshot)
+  assert.deepEqual(visibleItems(items, true).map((item) => item.key), ['a2'])
+  assert.deepEqual(visibleItems(items, false).map((item) => item.key), ['a2', 'b1', 'a1'])
+  const html = renderPanel({ snapshot, selected: 'b1', error: null, now: 0, workflowsOnly: true })
+  assert.ok(html.includes('<span class="count">1/3</span>'), 'Zähler fehlt')
+  assert.ok(/<input type="checkbox" data-filter="workflows-only" checked>/.test(html), 'Schalter fehlt')
+  assert.ok(!html.includes('data-key="b1"'), 'ausgeblendeter Job sichtbar')
+  assert.ok(/class="job selected"[^>]*data-key="a2"/.test(html), 'Auswahl springt nicht auf sichtbaren Job')
+})
+
+test('ist kein Job mit Workflow übrig, nennt das Panel das und lässt den Filter bedienbar', () => {
+  const idle: JobsSnapshot = { sessionsDir: '/s', groups: [snapshot.groups[1]] }
+  const html = renderPanel({ snapshot: idle, selected: null, error: null, now: 0, workflowsOnly: true })
+  assert.ok(html.includes('No job is running a workflow right now.'))
+  assert.ok(html.includes('data-filter="workflows-only"'))
+})
+
+test('Liste und Pipeline liegen in eigenen Scrollbereichen unter festen Überschriften (AK10)', () => {
+  const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 0, workflowsOnly: false })
+  assert.ok(/<section class="activity">\s*<header[^]*<\/header>\s*<ul class="jobs scroll">/.test(html), 'Activity-Bereich')
+  assert.ok(/<section class="detail">\s*<header[^]*Coding[^]*<\/header>\s*<div class="scroll">/.test(html), 'Pipeline-Bereich')
 })

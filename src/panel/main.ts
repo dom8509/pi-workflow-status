@@ -19,6 +19,9 @@ document.body.appendChild(root)
 let snapshot: JobsSnapshot | null = null
 let error: string | null = null
 let selected: string | null = null
+/** Filter „Workflows only“; Vorgabe an, die Wahl liegt im Plugin-Speicher (`storage:own`). */
+let workflowsOnly = true
+const FILTER_KEY = 'workflowsOnly'
 let sequence = 0
 
 let lastHtml = ''
@@ -28,20 +31,25 @@ let lastHtml = ''
  * Aktualisierung ersetzt die Knoten. Unveränderter Inhalt wird gar nicht neu gezeichnet.
  */
 function draw(): void {
-  const html = renderPanel({ snapshot, selected, error, now: Date.now() })
+  const html = renderPanel({ snapshot, selected, error, now: Date.now(), workflowsOnly })
   if (html !== lastHtml) {
-    const focusedKey = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>('button.job')?.dataset.key
+    const active = document.activeElement as HTMLElement | null
+    const focusedKey = active?.closest?.<HTMLElement>('button.job')?.dataset.key
+    const filterFocused = active?.matches?.('[data-filter]') ?? false
     const listScroll = root.querySelector('.jobs')?.scrollTop ?? 0
-    const pageScroll = document.scrollingElement?.scrollTop ?? 0
+    const detailScroll = root.querySelector('.detail .scroll')?.scrollTop ?? 0
     root.innerHTML = html
     lastHtml = html
     const list = root.querySelector('.jobs')
     if (list) list.scrollTop = listScroll
-    if (document.scrollingElement) document.scrollingElement.scrollTop = pageScroll
+    const detail = root.querySelector('.detail .scroll')
+    if (detail) detail.scrollTop = detailScroll
     if (focusedKey) {
       for (const button of root.querySelectorAll<HTMLElement>('button.job')) {
         if (button.dataset.key === focusedKey) button.focus({ preventScroll: true })
       }
+    } else if (filterFocused) {
+      root.querySelector<HTMLElement>('[data-filter]')?.focus({ preventScroll: true })
     }
   }
   // Die Auswahl merkt sich, welcher Job tatsächlich gezeigt wird.
@@ -61,6 +69,14 @@ async function refresh(): Promise<void> {
   }
   draw()
 }
+
+root.addEventListener('change', (event) => {
+  const input = event.target as HTMLInputElement
+  if (input.dataset.filter !== 'workflows-only') return
+  workflowsOnly = input.checked
+  draw()
+  void orca.storage.set(FILTER_KEY, workflowsOnly).catch(() => undefined)
+})
 
 root.addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLElement>('button.job')
@@ -86,5 +102,14 @@ const keepAlive = (): void => {
 }
 keepAlive()
 
+async function loadFilter(): Promise<void> {
+  try {
+    const stored = await orca.storage.get(FILTER_KEY)
+    if (typeof stored === 'boolean') workflowsOnly = stored
+  } catch {
+    // Ohne Speicher gilt die Vorgabe.
+  }
+}
+
 draw()
-void refresh()
+void loadFilter().then(refresh)

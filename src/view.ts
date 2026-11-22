@@ -52,6 +52,11 @@ function hasActiveWorkflow(item: ActivityItem): boolean {
   return Array.isArray(item.job.workflow) && item.job.workflow.length > 0
 }
 
+/** Mit Filter nur Jobs, die gerade einen Workflow ausführen. */
+export function visibleItems(items: ActivityItem[], workflowsOnly: boolean): ActivityItem[] {
+  return workflowsOnly ? items.filter(hasActiveWorkflow) : items
+}
+
 /** Die bisherige Auswahl, solange es den Job gibt; sonst der erste Job mit aktivem Workflow. */
 export function selectJob(items: ActivityItem[], current: string | null): string | null {
   if (current && items.some((item) => item.key === current)) return current
@@ -121,7 +126,7 @@ export function ago(at: number, now: number): string {
 const CHECK =
   '<svg class="check" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
-function renderPipeline(pipeline: Pipeline): string {
+function renderTimeline(pipeline: Pipeline): string {
   const stages = pipeline.stages
     .map((stage) => {
       const description = stage.description ? `<div class="stage-description">${escapeHtml(stage.description)}</div>` : ''
@@ -138,11 +143,35 @@ function renderPipeline(pipeline: Pipeline): string {
 </li>`
     })
     .join('')
-  return `<section class="pipeline">
-  <h2>${escapeHtml(pipeline.workflow)}</h2>
-  <p class="route">${pipeline.stages.map((stage) => escapeHtml(stage.id)).join(' → ')}</p>
-  <ol class="timeline">${stages}</ol>
+  return `<ol class="timeline">${stages}</ol>`
+}
+
+/** Verschachtelte Pipeline: Überschrift und Zeitleiste gemeinsam. */
+function renderPipeline(pipeline: Pipeline): string {
+  return `<div class="pipeline">${pipelineHeader(pipeline)}${renderTimeline(pipeline)}</div>`
+}
+
+function pipelineHeader(pipeline: Pipeline): string {
+  return `<h2>${escapeHtml(pipeline.workflow)}</h2>
+<p class="route">${pipeline.stages.map((stage) => escapeHtml(stage.id)).join(' → ')}</p>`
+}
+
+/** Die oberste Pipeline: Überschrift fest, Zeitleiste im eigenen Scrollbereich. */
+function renderDetail(pipeline: Pipeline): string {
+  return `<section class="detail">
+<header class="section-head">${pipelineHeader(pipeline)}</header>
+<div class="scroll">${renderTimeline(pipeline)}</div>
 </section>`
+}
+
+function chipsOf(item: ActivityItem): string {
+  const workflow = item.job.workflow
+  if (!Array.isArray(workflow) || workflow.length === 0) {
+    return `<span class="no-workflow">${escapeHtml(item.summary)}</span>`
+  }
+  return `<span class="chips">${workflow
+    .map((level) => `<span class="chip">${escapeHtml(level.workflow)} · ${escapeHtml(level.stage)}</span>`)
+    .join('')}</span>`
 }
 
 export type PanelModel = {
@@ -150,6 +179,8 @@ export type PanelModel = {
   selected: string | null
   error: string | null
   now: number
+  /** Nur Jobs zeigen, die einen Workflow ausführen. */
+  workflowsOnly: boolean
 }
 
 export function renderPanel(model: PanelModel): string {
@@ -165,24 +196,33 @@ export function renderPanel(model: PanelModel): string {
   if (items.length === 0) {
     return `${error}${failures}<p class="muted">No agents. No workspace on this computer has a running agent.</p>`
   }
-  const selected = selectJob(items, model.selected)
-  const list = items
+  const visible = visibleItems(items, model.workflowsOnly)
+  const selected = selectJob(visible, model.selected)
+  const list = visible
     .map(
       (item) => `<li><button type="button" class="job${item.key === selected ? ' selected' : ''}" data-key="${escapeHtml(item.key)}" aria-pressed="${item.key === selected}" title="${escapeHtml(item.workspace)}">
   <span class="job-title">${escapeHtml(item.title)}</span>
-  <span class="job-summary${hasActiveWorkflow(item) ? ' active' : ''}">${escapeHtml(item.summary)}</span>
+  ${chipsOf(item)}
   <span class="job-meta"><span class="state ${item.state}">${item.state}</span><span class="ago">${ago(item.stateStartedAt, model.now)}</span></span>
 </button></li>`
     )
     .join('')
-  const chosen = items.find((item) => item.key === selected)
+  const empty = visible.length === 0 ? '<li class="muted">No job is running a workflow right now.</li>' : ''
+  const header = `<header class="section-head activity-head">
+  <h2>Activity <span class="count">${visible.length}/${items.length}</span></h2>
+  <label class="filter"><input type="checkbox" data-filter="workflows-only"${model.workflowsOnly ? ' checked' : ''}> Workflows only</label>
+</header>`
+  const chosen = visible.find((item) => item.key === selected)
   const pipeline = chosen ? pipelineOf(chosen.job.workflow) : null
   const detail = !chosen
     ? ''
     : pipeline
-      ? renderPipeline(pipeline)
-      : `<p class="muted">${escapeHtml(chosen.title)} has no Pi workflow right now (${escapeHtml(chosen.summary)}).</p>`
+      ? renderDetail(pipeline)
+      : `<section class="detail"><p class="muted">${escapeHtml(chosen.title)} has no Pi workflow right now (${escapeHtml(chosen.summary)}).</p></section>`
   return `${error}${failures}
-<section class="activity"><h2>Activity</h2><ul class="jobs">${list}</ul></section>
+<section class="activity">
+${header}
+<ul class="jobs scroll">${list}${empty}</ul>
+</section>
 ${detail}`
 }

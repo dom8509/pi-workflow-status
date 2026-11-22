@@ -33,6 +33,7 @@
     { "kind": "workspace:read" },
     { "kind": "agent:read" },
     { "kind": "settings:own" },
-    { "kind": "history:read" }
+    { "kind": "history:read" },
+    { "kind": "storage:own" }
   ]
 }
