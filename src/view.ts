@@ -70,14 +70,18 @@ export function pipelineOf(workflow: JobWorkflow): Pipeline | null {
 
 function levelPipeline(levels: WorkflowLevel[], depth: number): Pipeline {
   const level = levels[depth]
-  const stages = level.stages.length > 0 ? level.stages : [{ id: level.stage, description: null }]
+  // Eine Phase, die die Definition nicht kennt, hängt als aktuelle Phase hinten an, damit sie und
+  // ein darüberliegender Prüf-Workflow sichtbar bleiben.
+  const known = level.stages.some((stage) => stage.id === level.stage)
+  const stages = known ? level.stages : [...level.stages, { id: level.stage, description: null }]
   const current = stages.findIndex((stage) => stage.id === level.stage)
   return {
     workflow: level.workflow,
     stages: stages.map((stage, index) => ({
       id: stage.id,
       description: stage.description,
-      status: index === current ? 'current' : current >= 0 && index < current ? 'done' : 'pending',
+      // Bei unbekannter Phase ist offen, was davor erledigt ist; die Definition bleibt dann offen.
+      status: index === current ? 'current' : known && index < current ? 'done' : 'pending',
       next: stage.id === level.pendingStage
     })),
     nested: depth + 1 < levels.length ? levelPipeline(levels, depth + 1) : null
@@ -166,7 +170,8 @@ export function renderPanel(model: PanelModel): string {
     .map(
       (item) => `<li><button type="button" class="job${item.key === selected ? ' selected' : ''}" data-key="${escapeHtml(item.key)}" aria-pressed="${item.key === selected}" title="${escapeHtml(item.workspace)}">
   <span class="job-title">${escapeHtml(item.title)}</span>
-  <span class="job-meta"><span class="state ${item.state}">${item.state}</span><span class="job-summary${hasActiveWorkflow(item) ? ' active' : ''}">${escapeHtml(item.summary)}</span><span class="ago">${ago(item.stateStartedAt, model.now)}</span></span>
+  <span class="job-summary${hasActiveWorkflow(item) ? ' active' : ''}">${escapeHtml(item.summary)}</span>
+  <span class="job-meta"><span class="state ${item.state}">${item.state}</span><span class="ago">${ago(item.stateStartedAt, model.now)}</span></span>
 </button></li>`
     )
     .join('')

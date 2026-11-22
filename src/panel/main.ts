@@ -21,8 +21,29 @@ let error: string | null = null
 let selected: string | null = null
 let sequence = 0
 
+let lastHtml = ''
+
+/**
+ * Zeichnet neu und erhält dabei Tastaturfokus und Scrollposition der Liste, denn jede
+ * Aktualisierung ersetzt die Knoten. Unveränderter Inhalt wird gar nicht neu gezeichnet.
+ */
 function draw(): void {
-  root.innerHTML = renderPanel({ snapshot, selected, error, now: Date.now() })
+  const html = renderPanel({ snapshot, selected, error, now: Date.now() })
+  if (html !== lastHtml) {
+    const focusedKey = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>('button.job')?.dataset.key
+    const listScroll = root.querySelector('.jobs')?.scrollTop ?? 0
+    const pageScroll = document.scrollingElement?.scrollTop ?? 0
+    root.innerHTML = html
+    lastHtml = html
+    const list = root.querySelector('.jobs')
+    if (list) list.scrollTop = listScroll
+    if (document.scrollingElement) document.scrollingElement.scrollTop = pageScroll
+    if (focusedKey) {
+      for (const button of root.querySelectorAll<HTMLElement>('button.job')) {
+        if (button.dataset.key === focusedKey) button.focus({ preventScroll: true })
+      }
+    }
+  }
   // Die Auswahl merkt sich, welcher Job tatsächlich gezeigt wird.
   selected = root.querySelector<HTMLElement>('.job.selected')?.dataset.key ?? selected
 }

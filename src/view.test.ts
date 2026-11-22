@@ -114,3 +114,23 @@ test('ein Job ohne aktiven Workflow zeigt statt einer Pipeline einen Hinweis', (
   const html = renderPanel({ snapshot, selected: 'a1', error: null, now: 0 })
   assert.ok(html.includes('has no Pi workflow'))
 })
+
+test('eine aktuelle Phase außerhalb der Definition bleibt mit ihrem Prüf-Workflow sichtbar', () => {
+  const pipeline = pipelineOf([
+    { workflow: 'Custom', stage: 'extra', stageNumber: null, stageCount: null, stages: [{ id: 'a', description: 'A' }] },
+    { workflow: 'ResultCheck', stage: 'check', stageNumber: 1, stageCount: 1, stages: [{ id: 'check', description: null }] }
+  ])
+  assert.deepEqual(
+    pipeline?.stages.map((stage) => [stage.id, stage.status]),
+    [
+      ['a', 'pending'],
+      ['extra', 'current']
+    ]
+  )
+  assert.equal(pipeline?.nested?.workflow, 'ResultCheck')
+})
+
+test('die Zusammenfassung steht in einer eigenen, umbrechenden Zeile je Job (AK1)', () => {
+  const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 0 })
+  assert.ok(/<span class="job-summary active">Coding · plan › ResultCheck · check<\/span>\s*<span class="job-meta">/.test(html))
+})

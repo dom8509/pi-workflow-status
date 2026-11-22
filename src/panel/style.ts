@@ -49,7 +49,7 @@ h2 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
 .job.selected { border-color: var(--orca-primary); box-shadow: inset 3px 0 0 var(--orca-primary); }
 .job-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-meta { font-size: 11px; color: var(--orca-muted-foreground); display: flex; gap: 6px; align-items: center; min-width: 0; }
-.job-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-summary { font-size: 12px; color: var(--orca-muted-foreground); overflow-wrap: anywhere; }
 .job-summary.active { color: var(--orca-foreground); font-weight: 500; }
 .ago { flex: none; }
 .state {
