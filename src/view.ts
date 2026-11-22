@@ -94,18 +94,18 @@ function levelPipeline(levels: WorkflowLevel[], depth: number): Pipeline {
 }
 
 /** Farbtöne der bekannten Workflows; Coding blau, Package violett, ResultCheck türkis. */
-const KNOWN_HUES: Record<string, number> = {
-  Coding: 215,
-  Package: 270,
-  ResultCheck: 175,
-  Research: 30,
-  Analysis: 330,
-  Extraction: 95
-}
+const KNOWN_HUES = new Map<string, number>([
+  ['Coding', 215],
+  ['Package', 270],
+  ['ResultCheck', 175],
+  ['Research', 30],
+  ['Analysis', 330],
+  ['Extraction', 95]
+])
 
 /** Fester Farbton (0–359) eines Workflows; unbekannte Namen bekommen einen aus ihrem Namen. */
 export function workflowHue(name: string): number {
-  const known = KNOWN_HUES[name]
+  const known = KNOWN_HUES.get(name)
   if (known !== undefined) return known
   let hash = 0
   for (const char of name) hash = (hash * 31 + char.codePointAt(0)!) >>> 0

@@ -9,10 +9,11 @@ const tint = (variable: string, percent: number) => `color-mix(in srgb, var(${va
 export const PANEL_CSS = `
 :root {
   color-scheme: light dark;
-  --c-done: hsl(142 64% 32%);
-  --c-active: hsl(214 84% 46%);
-  --c-wait: hsl(34 92% 40%);
-  --chip-l: 36%;
+  /* Kontrast ≥ 4,5:1 für kleinen Text auf Weiß samt Tönung, für jeden Farbton geprüft. */
+  --c-done: hsl(142 70% 24%);
+  --c-active: hsl(214 90% 38%);
+  --c-wait: hsl(30 95% 30%);
+  --chip-l: 26%;
   --chip-bg: 0.13;
 }
 html.dark {
@@ -143,8 +144,8 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; display: flex; align-items: c
   border: 2px solid var(--orca-border);
   background: var(--orca-background);
 }
-.stage.done .dot { border-color: var(--c-done); background: var(--c-done); }
-.stage.current .dot {
+.stage.done > .dot { border-color: var(--c-done); background: var(--c-done); }
+.stage.current > .dot {
   border-color: var(--c-active);
   background: radial-gradient(circle, var(--c-active) 0 3px, var(--orca-background) 3.5px);
   box-shadow: 0 0 0 4px ${tint('--c-active', 22)};
@@ -164,7 +165,7 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; display: flex; align-items: c
 .stage.pending > .stage-card { color: var(--orca-muted-foreground); }
 .stage-head { display: flex; align-items: center; gap: 6px; }
 .stage-name { font-weight: 600; flex: 1; }
-.stage.current .stage-name { color: var(--c-active); }
+.stage.current > .stage-card .stage-name { color: var(--c-active); }
 .stage-description { font-size: 12px; color: var(--orca-muted-foreground); margin-top: 2px; }
 .check { width: 16px; height: 16px; color: var(--c-done); flex: none; }
 .next {

@@ -183,3 +183,10 @@ test('die Pipeline-Überschrift trägt die Farbe ihres Workflows (AK11)', () => 
   assert.ok(html.includes('<h2 style="--hue: 215"><span class="hue-dot"></span>Coding</h2>'))
   assert.ok(html.includes('<h2 style="--hue: 175"><span class="hue-dot"></span>ResultCheck</h2>'))
 })
+
+test('Namen wie Objekt-Eigenschaften ergeben trotzdem einen Farbton 0–359', () => {
+  for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    const hue = workflowHue(name)
+    assert.ok(Number.isInteger(hue) && hue >= 0 && hue < 360, `${name} → ${String(hue)}`)
+  }
+})
