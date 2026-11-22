@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as main from './worker'
 import { setCliAgentsReader } from './titles'
+import { RemoteJobs, setRemoteCli } from './remote'
 
 const PI_ID = '01a2030f-acbf-7611-ba03-9134156f5b2c'
 const WS_A = 'proj::/Users/dom/orca/workspaces/breathing-mind/hearturchin'
@@ -52,7 +53,17 @@ let root = ''
 
 let cliAgents: unknown = { agents: [] }
 
+/** What the CLI answers for `environment list` and `plugin dev request`, per test. */
+let remoteCli: (args: string[]) => Promise<unknown> = async () => ({ ok: true, result: { environments: [] } })
+const remoteCalls: string[][] = []
+
 beforeEach(() => {
+  remoteCalls.length = 0
+  remoteCli = async () => ({ ok: true, result: { environments: [] } })
+  setRemoteCli((args) => {
+    remoteCalls.push(args)
+    return remoteCli(args)
+  })
   cliAgents = { agents: [] }
   setCliAgentsReader(async () => {
     if (cliAgents instanceof Error) throw cliAgents
@@ -82,10 +93,11 @@ function host(
     workspaces?: unknown[]
     sessions?: Record<string, unknown[] | Error>
     sessionsDelayMs?: number
+    settings?: Record<string, string>
   } = {}
 ) {
   return mockHost({
-    settings: { sessionsDir: root },
+    settings: { sessionsDir: root, ...extra.settings },
     results: {
       'agent.listSessions': async (params: { workspaceId?: string }) => {
         if (extra.sessionsDelayMs) await new Promise((resolve) => setTimeout(resolve, extra.sessionsDelayMs))
@@ -216,7 +228,7 @@ test('an error in one workspace leaves the others; empty workspaces and other ho
         workspaces: [
           { id: WS_A, kind: 'worktree', name: 'hearturchin', path: '/Users/dom/orca/workspaces/breathing-mind/hearturchin', branch: 'main', hostId: 'local' },
           { id: WS_B, kind: 'worktree', name: 'BM-225', path: '/Users/dom/orca/workspaces/breathing-mind/BM-225', branch: 'x', hostId: 'local' },
-          { id: 'leer', kind: 'folder', name: 'leer', path: '/tmp/leer', branch: null, hostId: null },
+          { id: 'empty', kind: 'folder', name: 'empty', path: '/tmp/empty', branch: null, hostId: null },
           { id: 'remote', kind: 'worktree', name: 'remote', path: '/srv/x', branch: 'main', hostId: 'ssh:box' }
         ]
       }
@@ -232,8 +244,11 @@ test('an error in one workspace leaves the others; empty workspaces and other ho
     }
   ])
   assert.deepEqual(
-    worker.host.calls.filter((call) => call.method === 'agents.list').map((call) => (call.params as { workspaceId: string }).workspaceId),
-    [WS_A, WS_B, 'leer']
+    worker.host.calls
+      .filter((call) => call.method === 'agents.list')
+      .map((call) => (call.params as { workspaceId: string }).workspaceId)
+      .sort(),
+    [WS_B, WS_A, 'empty', 'remote'].sort()
   )
   await worker.deactivate()
 })
@@ -475,4 +490,156 @@ test('the key of a job without a terminal is its sessionId and stays stable', as
   const { groups } = await worker.request('jobs.list')
   assert.equal(groups[0].jobs[0].key, `${WS_A}#abc`)
   await worker.deactivate()
+})
+
+const MAC_MINI = { id: 'env-1', name: 'Mac mini', runtimeId: 'R1' }
+const REMOTE_WS = { id: 'runtime-ws', kind: 'worktree', name: 'release', path: '/Users/x/release', branch: 'main', hostId: 'runtime:R1' }
+const remoteSnapshot = {
+  sessionsDir: '/remote',
+  groups: [
+    {
+      workspaceId: 'ws-r',
+      name: 'release',
+      jobs: [{ key: 'r1', title: 'Ship release 2.4', agent: 'pi', state: 'working', stateStartedAt: 7, workflow: [PLAN] }]
+    }
+  ]
+}
+
+function answeringServers(servers: { id: string; name: string; runtimeId?: string }[], answers: Record<string, unknown>) {
+  return async (args: string[]) => {
+    if (args[0] === 'status') return { ok: true, result: { runtime: { runtimeId: 'THIS-RUNTIME' } } }
+    if (args[0] === 'environment') return { ok: true, result: { environments: servers } }
+    const env = args[args.indexOf('--environment') + 1]
+    const answer = answers[env]
+    if (answer instanceof Error) throw answer
+    if (answer instanceof Promise) return answer
+    return { ok: true, result: { pluginKey: 'local.pi-workflow-status', name: 'jobs.list', result: answer } }
+  }
+}
+
+test('jobs of a paired Orca server appear with the server name and their workflow', async () => {
+  remoteCli = answeringServers([MAC_MINI], { 'env-1': remoteSnapshot })
+  const worker = await mountWorker(main, {
+    host: host(
+      { [WS_A]: [{ terminalId: 't1', title: 'Local', agent: 'claude', state: 'done', stateStartedAt: 1 }], 'runtime-ws': [{ terminalId: 'x', title: 'Ship release 2.4', agent: 'pi', state: 'working', stateStartedAt: 7 }] },
+      { workspaces: [{ id: WS_A, kind: 'worktree', name: 'hearturchin', path: '/a', branch: 'main', hostId: 'local' }, REMOTE_WS] }
+    )
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.deepEqual(groups, [
+    { workspaceId: WS_A, name: 'hearturchin', jobs: [{ key: 't1', title: 'Local', agent: 'claude', state: 'done', stateStartedAt: 1, workflow: 'none' }] },
+    {
+      workspaceId: 'env-1/ws-r',
+      name: 'release',
+      host: 'Mac mini',
+      jobs: [{ key: 'env-1/r1', title: 'Ship release 2.4', agent: 'pi', state: 'working', stateStartedAt: 7, workflow: [PLAN] }]
+    }
+  ])
+  const request = remoteCalls.find((args) => args.includes('request'))
+  assert.ok(request, 'server not asked')
+  assert.deepEqual(request.slice(0, 5), ['plugin', 'dev', 'request', 'local.pi-workflow-status', 'jobs.list'])
+  assert.equal(request[request.indexOf('--data') + 1], '{"includeRemote":false}')
+  await worker.deactivate()
+})
+
+test('a request from another server lists only local jobs, names this runtime and asks no servers', async () => {
+  remoteCli = answeringServers([MAC_MINI], { 'env-1': remoteSnapshot })
+  const worker = await mountWorker(main, {
+    host: host(
+      { 'runtime-ws': [{ terminalId: 'x', title: 'Third host job', agent: 'pi', state: 'working', stateStartedAt: 7 }] },
+      { workspaces: [REMOTE_WS] }
+    )
+  })
+  const answer = await worker.request('jobs.list', { includeRemote: false })
+  assert.deepEqual(answer.groups, [])
+  assert.equal(answer.runtimeId, 'THIS-RUNTIME')
+  assert.deepEqual(remoteCalls.filter((args) => args[0] !== 'status'), [])
+  await worker.deactivate()
+})
+
+test('workspaces of a server that does not answer show their agents as not readable', async () => {
+  remoteCli = answeringServers([MAC_MINI], { 'env-1': new Error('Installed plugins are refused') })
+  const worker = await mountWorker(main, {
+    host: host(
+      {
+        'runtime-ws': [{ terminalId: 'x', title: 'Ship release 2.4', agent: 'pi', state: 'working', stateStartedAt: 7 }],
+        'ssh-ws': [{ terminalId: 'y', title: 'Box job', agent: 'claude', state: 'done', stateStartedAt: 8 }]
+      },
+      { workspaces: [REMOTE_WS, { id: 'ssh-ws', kind: 'worktree', name: 'box', path: '/srv/box', branch: 'main', hostId: 'ssh:box' }] }
+    )
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.deepEqual(groups, [
+    { workspaceId: 'runtime-ws', name: 'release', host: 'Mac mini', jobs: [{ key: 'x', title: 'Ship release 2.4', agent: 'pi', state: 'working', stateStartedAt: 7, workflow: 'remote' }] },
+    { workspaceId: 'ssh-ws', name: 'box', host: 'ssh:box', jobs: [{ key: 'y', title: 'Box job', agent: 'claude', state: 'done', stateStartedAt: 8, workflow: 'remote' }] }
+  ])
+  await worker.deactivate()
+})
+
+test('a slow server does not delay jobs.list; its jobs follow with jobs.changed', async () => {
+  let release: (value: unknown) => void = () => undefined
+  const pending = new Promise((resolve) => {
+    release = resolve
+  })
+  remoteCli = answeringServers([MAC_MINI], { 'env-1': pending })
+  const worker = await mountWorker(main, { host: host({}, { workspaces: [] }) })
+  const started = Date.now()
+  const first = await worker.request('jobs.list')
+  assert.ok(Date.now() - started < 1500, 'jobs.list waited for the server')
+  assert.deepEqual(first.groups, [])
+  const before = worker.posts.filter((post) => post.event === 'jobs.changed').length
+  release({ ok: true, result: { pluginKey: 'local.pi-workflow-status', name: 'jobs.list', result: remoteSnapshot } })
+  await waitForPost(worker, before + 1, 2000)
+  const second = await worker.request('jobs.list')
+  assert.deepEqual(second.groups.map((group) => [group.host, group.name]), [['Mac mini', 'release']])
+  await worker.deactivate()
+})
+
+test('the setting limits which paired servers are asked', async () => {
+  remoteCli = answeringServers(
+    [MAC_MINI, { id: 'env-2', name: 'Build box', runtimeId: 'R2' }],
+    { 'env-1': remoteSnapshot, 'env-2': remoteSnapshot }
+  )
+  const worker = await mountWorker(main, { host: host({}, { workspaces: [], settings: { remoteServers: ' Mac mini ' } }) })
+  await worker.request('jobs.list')
+  const asked = remoteCalls.filter((args) => args.includes('request')).map((args) => args[args.indexOf('--environment') + 1])
+  assert.deepEqual(asked, ['env-1'])
+  await worker.deactivate()
+})
+
+test('a server without runtime id is matched by the runtime id in its answer, others stay not readable', async () => {
+  const unnamed = { id: 'env-a', name: 'Server A', runtimeId: null as unknown as string }
+  remoteCli = answeringServers([unnamed], { 'env-a': { ...remoteSnapshot, runtimeId: 'R1' } })
+  const otherWs = { ...REMOTE_WS, id: 'other-ws', name: 'other', hostId: 'runtime:R2' }
+  const worker = await mountWorker(main, {
+    host: host(
+      {
+        'runtime-ws': [{ terminalId: 'x', title: 'Covered', agent: 'pi', state: 'working', stateStartedAt: 7 }],
+        'other-ws': [{ terminalId: 'z', title: 'R2 job', agent: 'pi', state: 'working', stateStartedAt: 9 }]
+      },
+      { workspaces: [REMOTE_WS, otherWs] }
+    )
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.deepEqual(
+    groups.map((group) => [group.workspaceId, group.host, group.jobs.map((job) => job.workflow === 'remote')]),
+    [
+      ['other-ws', 'runtime:R2', [true]],
+      ['env-a/ws-r', 'Server A', [false]]
+    ]
+  )
+  await worker.deactivate()
+})
+
+test('changing the server filter takes effect on the next request', async () => {
+  remoteCli = answeringServers(
+    [MAC_MINI, { id: 'env-2', name: 'Build box', runtimeId: 'R2' }],
+    { 'env-1': remoteSnapshot, 'env-2': remoteSnapshot }
+  )
+  const jobs = new RemoteJobs(() => undefined)
+  const first = await jobs.current(['Mac mini'], 1000)
+  const second = await jobs.current(['Build box'], 1000)
+  assert.deepEqual(first.map((entry) => entry.server.name), ['Mac mini'])
+  assert.deepEqual(second.map((entry) => entry.server.name), ['Build box'])
+  assert.ok(second[0].groups, 'Build box was not asked')
 })

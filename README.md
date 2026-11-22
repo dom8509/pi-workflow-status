@@ -19,6 +19,20 @@ An [Orca](https://onorca.dev) plugin that shows, for every agent in every local 
 Agents without a Pi session, for example Claude Code, show `no workflow`. The panel is available
 in the Orca desktop app.
 
+## Jobs on other computers
+
+Pi session files live on the computer that runs the job. To show jobs of a paired Orca server (one
+you added with `orca environment add`), the plugin asks the same plugin on that server:
+
+```sh
+orca plugin dev request local.pi-workflow-status jobs.list --data '{"includeRemote":false}' --environment <server>
+```
+
+Orca answers this only for a plugin loaded as a development folder, so on each server run
+`orca plugin dev load <folder of this repository>`. Jobs of a server show its name; workspaces of
+other hosts without an answering plugin show their agents with `workflow not readable`. Remote jobs
+refresh with the panel, at most every 15 s.
+
 ## Requirements
 
 - Orca 1.4.259 or later
@@ -41,13 +55,17 @@ Orca asks you to approve the access the plugin needs:
 | `storage:own` | remember the **Workflows only** switch |
 
 The plugin runs as a `trusted-worker`, a Node process with your user's file access. It reads only
-files that, after resolving symbolic links, lie below the sessions folder, and it calls
-`orca agent list --json` to find tab titles Orca's history does not have.
+files that, after resolving symbolic links, lie below the sessions folder. It calls the `orca` CLI
+for `orca agent list --json` (tab titles Orca's history does not have), `orca environment list`
+and `orca plugin dev request … --environment` (jobs of paired servers).
 
 ## Settings
 
-**Pi sessions folder** (Settings → Plugins → PI Workflow Status): where Pi stores its session files,
-`~/.pi/agent/sessions` by default.
+In Settings → Plugins → PI Workflow Status:
+
+- **Pi sessions folder**: where Pi stores its session files, `~/.pi/agent/sessions` by default.
+- **Remote Orca servers**: names or ids of paired servers to ask, separated by commas; empty asks
+  every saved server.
 
 ## How it works
 

@@ -6,6 +6,8 @@ export type ActivityItem = {
   key: string
   title: string
   workspace: string
+  /** Paired server or host the job runs on; null for this computer. */
+  host: string | null
   state: AgentState
   stateStartedAt: number
   /** Short form for the list, for example `Coding · plan › ResultCheck · check`. */
@@ -27,6 +29,7 @@ const ACTIVE: Record<AgentState, number> = { working: 0, blocked: 0, waiting: 0,
 export function summaryOf(workflow: JobWorkflow): string {
   if (workflow === 'none') return 'no workflow'
   if (workflow === 'unknown') return 'workflow unknown'
+  if (workflow === 'remote') return 'workflow not readable'
   if (workflow.length === 0) return 'no active workflow'
   return workflow.map((level) => `${level.workflow} · ${level.stage}`).join(' › ')
 }
@@ -39,6 +42,7 @@ export function activityOf(snapshot: JobsSnapshot): ActivityItem[] {
         key: job.key,
         title: job.title,
         workspace: group.name,
+        host: group.host ?? null,
         state: job.state,
         stateStartedAt: job.stateStartedAt,
         summary: summaryOf(job.workflow),
@@ -219,10 +223,10 @@ export function renderPanel(model: PanelModel): string {
   const selected = selectJob(visible, model.selected)
   const list = visible
     .map(
-      (item) => `<li><button type="button" class="job${item.key === selected ? ' selected' : ''}" data-key="${escapeHtml(item.key)}" aria-pressed="${item.key === selected}" title="${escapeHtml(item.workspace)}">
+      (item) => `<li><button type="button" class="job${item.key === selected ? ' selected' : ''}" data-key="${escapeHtml(item.key)}" aria-pressed="${item.key === selected}" title="${escapeHtml(item.host ? `${item.host} · ${item.workspace}` : item.workspace)}">
   <span class="job-title">${escapeHtml(item.title)}</span>
   ${chipsOf(item)}
-  <span class="job-meta"><span class="state ${item.state}">${item.state}</span><span class="ago">${ago(item.stateStartedAt, model.now)}</span></span>
+  <span class="job-meta"><span class="state ${item.state}">${item.state}</span>${item.host ? `<span class="host">${escapeHtml(item.host)}</span>` : ''}<span class="ago">${ago(item.stateStartedAt, model.now)}</span></span>
 </button></li>`
     )
     .join('')

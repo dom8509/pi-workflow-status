@@ -4,6 +4,7 @@ import type { OrcaWorkerApi } from 'orca/worker'
 import type { AgentState, Job, JobGroup, JobsSnapshot, JobWorkflow } from './protocol'
 import { DEFAULT_SESSIONS_DIR, SessionIndex, expandHome, readWorkflowStack, watchSessions } from './sessions'
 import { cliAgents, inWorkspace, uniqueCliTitle, type CliAgent } from './titles'
+import { RemoteJobs, localRuntimeId, type RemoteResult } from './remote'
 
 /** Delay over which several writes are batched into one notification. */
 const CHANGE_DELAY_MS = 500
@@ -128,14 +129,78 @@ function sameTitles(a: Map<string, string>, b: Map<string, string>): boolean {
 /** Last known titles across requests; a new worker starts empty. */
 export type TitleStore = { titles: Map<string, string>; onLate: () => void }
 
-export async function listJobs(orca: OrcaWorkerApi, store: TitleStore): Promise<JobsSnapshot> {
+const isLocal = (workspace: WorkspaceRow) => workspace.hostId === null || workspace.hostId === 'local'
+
+/** How long `jobs.list` waits for paired servers; later answers follow with `jobs.changed`. */
+const REMOTE_BUDGET_MS = 300
+
+async function remoteServers(orca: OrcaWorkerApi): Promise<string[]> {
+  const value = await orca.settings.get('remoteServers')
+  return typeof value === 'string'
+    ? value.split(',').map((name) => name.trim()).filter(Boolean)
+    : []
+}
+
+/**
+ * Workspace of another host that no paired server covered: its agents, with the workflow marked
+ * as not readable, because the session files are on that host.
+ */
+async function unreadableGroup(orca: OrcaWorkerApi, workspace: WorkspaceRow, host: string): Promise<JobGroup | null> {
+  try {
+    const { agents } = (await orca.host.call('agents.list', { workspaceId: workspace.id })) as { agents: AgentRow[] }
+    if (agents.length === 0) return null
+    return {
+      workspaceId: workspace.id,
+      name: workspace.name,
+      host,
+      jobs: agents.map((agent, position) => ({
+        key: keyOf(workspace, agent, position),
+        title: agent.title ?? agent.agent ?? 'Agent',
+        agent: agent.agent,
+        state: agent.state,
+        stateStartedAt: agent.stateStartedAt,
+        workflow: 'remote' as const
+      }))
+    }
+  } catch (error) {
+    return { workspaceId: workspace.id, name: workspace.name, host, jobs: [], error: errorMessage(error) }
+  }
+}
+
+/**
+ * The server that owns a workspace of another host, matched by runtime id. Without a known runtime
+ * id the owner stays unknown, so the workspace keeps its unreadable rows instead of vanishing.
+ */
+function ownerOf(workspace: WorkspaceRow, remote: RemoteResult[]): { name: string; covered: boolean } | null {
+  const hostId = workspace.hostId ?? ''
+  const owner = remote.find((entry) => entry.runtimeId && hostId === `runtime:${entry.runtimeId}`)
+  return owner ? { name: owner.server.name, covered: owner.groups !== null } : null
+}
+
+export async function listJobs(
+  orca: OrcaWorkerApi,
+  store: TitleStore,
+  remoteJobs: RemoteJobs | null = null
+): Promise<JobsSnapshot> {
   const dir = await sessionsDir(orca)
   const index = new SessionIndex(dir)
   const { workspaces } = (await orca.host.call('workspace.list', {})) as { workspaces: WorkspaceRow[] }
+  const remote = remoteJobs ? await remoteJobs.current(await remoteServers(orca), REMOTE_BUDGET_MS) : []
+  // A local-only request (from another computer) leaves out other hosts entirely: the asking
+  // computer sees them itself, and this one could only attribute them to the wrong host.
+  const others = await Promise.all(
+    workspaces
+      .filter((workspace) => remoteJobs !== null && !isLocal(workspace))
+      .map(async (workspace) => {
+        const owner = ownerOf(workspace, remote)
+        if (owner?.covered) return null
+        return unreadableGroup(orca, workspace, owner?.name ?? workspace.hostId ?? 'other host')
+      })
+  )
   const fetched: Fetched[] = await Promise.all(
     workspaces
-      // This computer only: sessions of other hosts are not in the local sessions folder.
-      .filter((workspace) => workspace.hostId === null || workspace.hostId === 'local')
+      // Session files of this computer only; other hosts come from their own server or as unreadable.
+      .filter(isLocal)
       .map(async (workspace): Promise<Fetched> => {
         try {
           const { agents } = (await orca.host.call('agents.list', { workspaceId: workspace.id })) as {
@@ -167,19 +232,32 @@ export async function listJobs(orca: OrcaWorkerApi, store: TitleStore): Promise<
     })
   }
 
-  const groups: JobGroup[] = []
+  const localGroups = new Map<string, JobGroup | null>()
   for (const entry of fetched) {
     if (!('agents' in entry)) {
-      groups.push({ workspaceId: entry.workspace.id, name: entry.workspace.name, jobs: [], error: entry.error })
+      localGroups.set(entry.workspace.id, { workspaceId: entry.workspace.id, name: entry.workspace.name, jobs: [], error: entry.error })
     } else if (entry.agents.length > 0) {
-      groups.push({
+      localGroups.set(entry.workspace.id, {
         workspaceId: entry.workspace.id,
         name: entry.workspace.name,
         jobs: jobsOf(entry.workspace, entry.agents, index, store.titles)
       })
     }
   }
-  return { groups, sessionsDir: dir }
+  const otherGroups = new Map(
+    workspaces
+      .filter((workspace) => remoteJobs !== null && !isLocal(workspace))
+      .map((workspace, position) => [workspace.id, others[position]])
+  )
+  // Workspaces in Orca's order, then the jobs each paired server reported.
+  const groups: JobGroup[] = workspaces
+    .map((workspace) => (isLocal(workspace) ? localGroups.get(workspace.id) : otherGroups.get(workspace.id)) ?? null)
+    .filter((group): group is JobGroup => group !== null)
+  for (const entry of remote) groups.push(...(entry.groups ?? []))
+  if (remoteJobs) return { groups, sessionsDir: dir }
+  // The asking computer matches this answer to its `runtime:<id>` workspaces.
+  const runtimeId = await localRuntimeId()
+  return runtimeId ? { groups, sessionsDir: dir, runtimeId } : { groups, sessionsDir: dir }
 }
 
 /** Interval in which the worker recreates a missing or failed watcher. */
@@ -195,6 +273,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   let gap = false
   const changed = () => orca.panels.post('jobs.changed', { at: Date.now() })
   const store: TitleStore = { titles: new Map(), onLate: changed }
+  const remoteJobs = new RemoteJobs(changed)
 
   function scheduleRetry(): void {
     if (retry) return
@@ -227,9 +306,11 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
   }
 
-  orca.panels.handle('jobs.list', async () => {
+  orca.panels.handle('jobs.list', async (input) => {
     await ensureWatching()
-    return listJobs(orca, store)
+    // A request from another server's worker lists only this computer, so servers never ask in circles.
+    const includeRemote = (input as { includeRemote?: boolean } | null)?.includeRemote !== false
+    return listJobs(orca, store, includeRemote ? remoteJobs : null)
   })
 
   orca.settings.onDidChange(({ key }) => {

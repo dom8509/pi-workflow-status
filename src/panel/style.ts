@@ -108,6 +108,12 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; display: flex; align-items: c
 .no-workflow { font-size: 12px; color: var(--orca-muted-foreground); }
 .job-meta { font-size: 11px; color: var(--orca-muted-foreground); display: flex; gap: 6px; align-items: center; }
 .ago { flex: none; }
+.host {
+  border: 1px solid var(--orca-border);
+  border-radius: 999px;
+  padding: 0 7px;
+  color: var(--orca-foreground);
+}
 .state {
   border-radius: 999px;
   padding: 0 7px;
