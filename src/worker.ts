@@ -4,7 +4,7 @@ import type { OrcaWorkerApi } from 'orca/worker'
 import type { AgentState, Job, JobGroup, JobsSnapshot, JobWorkflow } from './protocol'
 import { DEFAULT_SESSIONS_DIR, SessionIndex, expandHome, readWorkflowStack, watchSessions } from './sessions'
 import { cliAgents, inWorkspace, uniqueCliTitle, type CliAgent } from './titles'
-import { RemoteJobs, type RemoteResult } from './remote'
+import { RemoteJobs, localRuntimeId, type RemoteResult } from './remote'
 
 /** Delay over which several writes are batched into one notification. */
 const CHANGE_DELAY_MS = 500
@@ -167,17 +167,14 @@ async function unreadableGroup(orca: OrcaWorkerApi, workspace: WorkspaceRow, hos
   }
 }
 
-/** Which server, if any, owns a workspace of another host, and whether its answer covers it. */
+/**
+ * The server that owns a workspace of another host, matched by runtime id. Without a known runtime
+ * id the owner stays unknown, so the workspace keeps its unreadable rows instead of vanishing.
+ */
 function ownerOf(workspace: WorkspaceRow, remote: RemoteResult[]): { name: string; covered: boolean } | null {
   const hostId = workspace.hostId ?? ''
-  const exact = remote.find((entry) => entry.server.runtimeId && hostId === `runtime:${entry.server.runtimeId}`)
-  if (exact) return { name: exact.server.name, covered: exact.groups !== null }
-  // Without a runtime id the owner is unknown; a single answering server is taken as the owner.
-  if (hostId.startsWith('runtime:')) {
-    const unmatched = remote.filter((entry) => !entry.server.runtimeId)
-    if (unmatched.length === 1) return { name: unmatched[0].server.name, covered: unmatched[0].groups !== null }
-  }
-  return null
+  const owner = remote.find((entry) => entry.runtimeId && hostId === `runtime:${entry.runtimeId}`)
+  return owner ? { name: owner.server.name, covered: owner.groups !== null } : null
 }
 
 export async function listJobs(
@@ -189,9 +186,11 @@ export async function listJobs(
   const index = new SessionIndex(dir)
   const { workspaces } = (await orca.host.call('workspace.list', {})) as { workspaces: WorkspaceRow[] }
   const remote = remoteJobs ? await remoteJobs.current(await remoteServers(orca), REMOTE_BUDGET_MS) : []
+  // A local-only request (from another computer) leaves out other hosts entirely: the asking
+  // computer sees them itself, and this one could only attribute them to the wrong host.
   const others = await Promise.all(
     workspaces
-      .filter((workspace) => !isLocal(workspace))
+      .filter((workspace) => remoteJobs !== null && !isLocal(workspace))
       .map(async (workspace) => {
         const owner = ownerOf(workspace, remote)
         if (owner?.covered) return null
@@ -246,14 +245,19 @@ export async function listJobs(
     }
   }
   const otherGroups = new Map(
-    workspaces.filter((workspace) => !isLocal(workspace)).map((workspace, position) => [workspace.id, others[position]])
+    workspaces
+      .filter((workspace) => remoteJobs !== null && !isLocal(workspace))
+      .map((workspace, position) => [workspace.id, others[position]])
   )
   // Workspaces in Orca's order, then the jobs each paired server reported.
   const groups: JobGroup[] = workspaces
     .map((workspace) => (isLocal(workspace) ? localGroups.get(workspace.id) : otherGroups.get(workspace.id)) ?? null)
     .filter((group): group is JobGroup => group !== null)
   for (const entry of remote) groups.push(...(entry.groups ?? []))
-  return { groups, sessionsDir: dir }
+  if (remoteJobs) return { groups, sessionsDir: dir }
+  // The asking computer matches this answer to its `runtime:<id>` workspaces.
+  const runtimeId = await localRuntimeId()
+  return runtimeId ? { groups, sessionsDir: dir, runtimeId } : { groups, sessionsDir: dir }
 }
 
 /** Interval in which the worker recreates a missing or failed watcher. */

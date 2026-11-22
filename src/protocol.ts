@@ -31,7 +31,12 @@ export type JobGroup = {
   error?: string
 }
 
-export type JobsSnapshot = { groups: JobGroup[]; sessionsDir: string }
+export type JobsSnapshot = {
+  groups: JobGroup[]
+  sessionsDir: string
+  /** Runtime id of the answering Orca; set in answers to other computers. */
+  runtimeId?: string
+}
 
 declare module 'orca' {
   interface PluginRequests {

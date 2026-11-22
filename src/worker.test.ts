@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as main from './worker'
 import { setCliAgentsReader } from './titles'
-import { setRemoteCli } from './remote'
+import { RemoteJobs, setRemoteCli } from './remote'
 
 const PI_ID = '01a2030f-acbf-7611-ba03-9134156f5b2c'
 const WS_A = 'proj::/Users/dom/orca/workspaces/breathing-mind/hearturchin'
@@ -507,6 +507,7 @@ const remoteSnapshot = {
 
 function answeringServers(servers: { id: string; name: string; runtimeId?: string }[], answers: Record<string, unknown>) {
   return async (args: string[]) => {
+    if (args[0] === 'status') return { ok: true, result: { runtime: { runtimeId: 'THIS-RUNTIME' } } }
     if (args[0] === 'environment') return { ok: true, result: { environments: servers } }
     const env = args[args.indexOf('--environment') + 1]
     const answer = answers[env]
@@ -541,12 +542,18 @@ test('jobs of a paired Orca server appear with the server name and their workflo
   await worker.deactivate()
 })
 
-test('a request from another server lists only local jobs and asks no servers', async () => {
+test('a request from another server lists only local jobs, names this runtime and asks no servers', async () => {
   remoteCli = answeringServers([MAC_MINI], { 'env-1': remoteSnapshot })
-  const worker = await mountWorker(main, { host: host({}, { workspaces: [REMOTE_WS] }) })
-  const { groups } = await worker.request('jobs.list', { includeRemote: false })
-  assert.deepEqual(groups, [])
-  assert.deepEqual(remoteCalls, [])
+  const worker = await mountWorker(main, {
+    host: host(
+      { 'runtime-ws': [{ terminalId: 'x', title: 'Third host job', agent: 'pi', state: 'working', stateStartedAt: 7 }] },
+      { workspaces: [REMOTE_WS] }
+    )
+  })
+  const answer = await worker.request('jobs.list', { includeRemote: false })
+  assert.deepEqual(answer.groups, [])
+  assert.equal(answer.runtimeId, 'THIS-RUNTIME')
+  assert.deepEqual(remoteCalls.filter((args) => args[0] !== 'status'), [])
   await worker.deactivate()
 })
 
@@ -598,4 +605,41 @@ test('the setting limits which paired servers are asked', async () => {
   const asked = remoteCalls.filter((args) => args.includes('request')).map((args) => args[args.indexOf('--environment') + 1])
   assert.deepEqual(asked, ['env-1'])
   await worker.deactivate()
+})
+
+test('a server without runtime id is matched by the runtime id in its answer, others stay not readable', async () => {
+  const unnamed = { id: 'env-a', name: 'Server A', runtimeId: null as unknown as string }
+  remoteCli = answeringServers([unnamed], { 'env-a': { ...remoteSnapshot, runtimeId: 'R1' } })
+  const otherWs = { ...REMOTE_WS, id: 'other-ws', name: 'other', hostId: 'runtime:R2' }
+  const worker = await mountWorker(main, {
+    host: host(
+      {
+        'runtime-ws': [{ terminalId: 'x', title: 'Covered', agent: 'pi', state: 'working', stateStartedAt: 7 }],
+        'other-ws': [{ terminalId: 'z', title: 'R2 job', agent: 'pi', state: 'working', stateStartedAt: 9 }]
+      },
+      { workspaces: [REMOTE_WS, otherWs] }
+    )
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.deepEqual(
+    groups.map((group) => [group.workspaceId, group.host, group.jobs.map((job) => job.workflow === 'remote')]),
+    [
+      ['other-ws', 'runtime:R2', [true]],
+      ['env-a/ws-r', 'Server A', [false]]
+    ]
+  )
+  await worker.deactivate()
+})
+
+test('changing the server filter takes effect on the next request', async () => {
+  remoteCli = answeringServers(
+    [MAC_MINI, { id: 'env-2', name: 'Build box', runtimeId: 'R2' }],
+    { 'env-1': remoteSnapshot, 'env-2': remoteSnapshot }
+  )
+  const jobs = new RemoteJobs(() => undefined)
+  const first = await jobs.current(['Mac mini'], 1000)
+  const second = await jobs.current(['Build box'], 1000)
+  assert.deepEqual(first.map((entry) => entry.server.name), ['Mac mini'])
+  assert.deepEqual(second.map((entry) => entry.server.name), ['Build box'])
+  assert.ok(second[0].groups, 'Build box was not asked')
 })

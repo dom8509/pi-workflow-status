@@ -25,7 +25,7 @@ Pi session files live on the computer that runs the job. To show jobs of a paire
 you added with `orca environment add`), the plugin asks the same plugin on that server:
 
 ```sh
-orca plugin dev request local.pi-workflow-status jobs.list --environment <server>
+orca plugin dev request local.pi-workflow-status jobs.list --data '{"includeRemote":false}' --environment <server>
 ```
 
 Orca answers this only for a plugin loaded as a development folder, so on each server run

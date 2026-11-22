@@ -65,8 +65,25 @@ export async function listServers(filter: string[]): Promise<RemoteServer[]> {
   return servers.filter((server) => filter.includes(server.name) || filter.includes(server.id))
 }
 
-/** The local jobs of one server, as its own worker lists them. */
-async function askServer(server: RemoteServer): Promise<JobGroup[]> {
+let ownRuntime: Promise<string | null> | null = null
+
+/** Runtime id of this computer's Orca, which other computers see as `hostId: runtime:<id>`. */
+export function localRuntimeId(): Promise<string | null> {
+  if (!ownRuntime) {
+    ownRuntime = runCli(['status', '--json'])
+      .then((answer) => text((answer as { result?: { runtime?: { runtimeId?: unknown } } } | null)?.result?.runtime?.runtimeId))
+      .catch(() => {
+        ownRuntime = null
+        return null
+      })
+  }
+  return ownRuntime
+}
+
+type Answer = { groups: JobGroup[]; runtimeId: string | null }
+
+/** The local jobs of one server, as its own worker lists them, and the server's runtime id. */
+async function askServer(server: RemoteServer): Promise<Answer> {
   const answer = (await runCli([
     'plugin', 'dev', 'request', REMOTE_PLUGIN_KEY, 'jobs.list',
     '--data', JSON.stringify({ includeRemote: false }),
@@ -77,15 +94,22 @@ async function askServer(server: RemoteServer): Promise<JobGroup[]> {
   const snapshot = answer?.result?.result
   if (!snapshot || !Array.isArray(snapshot.groups)) throw new Error('unexpected answer')
   // Ids of one server must not collide with local ones or another server's.
-  return snapshot.groups.map((group) => ({
+  const groups = snapshot.groups.map((group) => ({
     ...group,
     workspaceId: `${server.id}/${group.workspaceId}`,
     host: server.name,
     jobs: group.jobs.map((job) => ({ ...job, key: `${server.id}/${job.key}` }))
   }))
+  return { groups, runtimeId: text(snapshot.runtimeId) }
 }
 
-export type RemoteResult = { server: RemoteServer; groups: JobGroup[] | null }
+export type RemoteResult = {
+  server: RemoteServer
+  /** The server's jobs, null while it has not answered or when it failed. */
+  groups: JobGroup[] | null
+  /** Runtime id from the saved server or from its answer; null when neither names one. */
+  runtimeId: string | null
+}
 
 /**
  * Answers of all servers, cached per server. `current()` returns at once what is known; a server
@@ -93,8 +117,9 @@ export type RemoteResult = { server: RemoteServer; groups: JobGroup[] | null }
  * runs when a new answer arrives.
  */
 export class RemoteJobs {
+  /** All saved servers; the filter applies per request, so a changed setting acts at once. */
   private servers: RemoteServer[] = []
-  private answers = new Map<string, { at: number; groups: JobGroup[] | null }>()
+  private answers = new Map<string, { at: number; answer: Answer | null }>()
   private pending = new Set<string>()
   private listing: Promise<void> | null = null
   private listedAt = 0
@@ -107,13 +132,20 @@ export class RemoteJobs {
     let timer: ReturnType<typeof setTimeout> | undefined
     await Promise.race([work, new Promise((resolve) => (timer = setTimeout(resolve, waitMs)))])
     clearTimeout(timer)
-    return this.servers.map((server) => ({ server, groups: this.answers.get(server.id)?.groups ?? null }))
+    return this.selected(filter).map((server) => {
+      const answer = this.answers.get(server.id)?.answer ?? null
+      return { server, groups: answer?.groups ?? null, runtimeId: server.runtimeId ?? answer?.runtimeId ?? null }
+    })
+  }
+
+  private selected(filter: string[]): RemoteServer[] {
+    if (filter.length === 0) return this.servers
+    return this.servers.filter((server) => filter.includes(server.name) || filter.includes(server.id))
   }
 
   private async refresh(filter: string[]): Promise<void> {
-    const now = Date.now()
-    if (!this.listing && now - this.listedAt >= REMOTE_CACHE_MS) {
-      this.listing = listServers(filter)
+    if (!this.listing && Date.now() - this.listedAt >= REMOTE_CACHE_MS) {
+      this.listing = listServers([])
         .then((servers) => {
           this.servers = servers
         })
@@ -127,19 +159,19 @@ export class RemoteJobs {
     }
     if (this.listing) await this.listing
     await Promise.all(
-      this.servers.map(async (server) => {
+      this.selected(filter).map(async (server) => {
         const known = this.answers.get(server.id)
         if (this.pending.has(server.id) || (known && Date.now() - known.at < REMOTE_CACHE_MS)) return
         this.pending.add(server.id)
-        let groups: JobGroup[] | null
+        let answer: Answer | null
         try {
-          groups = await askServer(server)
+          answer = await askServer(server)
         } catch {
-          groups = null
+          answer = null
         }
         this.pending.delete(server.id)
-        const changed = JSON.stringify(known?.groups ?? null) !== JSON.stringify(groups)
-        this.answers.set(server.id, { at: Date.now(), groups })
+        const changed = JSON.stringify(known?.answer ?? null) !== JSON.stringify(answer)
+        this.answers.set(server.id, { at: Date.now(), answer })
         if (changed) this.onChange()
       })
     )
