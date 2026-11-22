@@ -33,6 +33,7 @@
   "capabilities": [
     { "kind": "workspace:read" },
     { "kind": "agent:read" },
-    { "kind": "settings:own" }
+    { "kind": "settings:own" },
+    { "kind": "history:read" }
   ]
 }

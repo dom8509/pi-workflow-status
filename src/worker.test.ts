@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as main from './worker'
+import { setCliAgentsReader } from './titles'
 
 const PI_ID = '01a2030f-acbf-7611-ba03-9134156f5b2c'
 const WS_A = 'proj::/Users/dom/orca/workspaces/breathing-mind/hearturchin'
@@ -35,7 +36,14 @@ const inPlan = session(
 
 let root = ''
 
+let cliAgents: unknown = { agents: [] }
+
 beforeEach(() => {
+  cliAgents = { agents: [] }
+  setCliAgentsReader(async () => {
+    if (cliAgents instanceof Error) throw cliAgents
+    return cliAgents
+  })
   root = mkdtempSync(join(tmpdir(), 'ows-test-'))
   mkdirSync(join(root, DIR_A))
   mkdirSync(join(root, DIR_B))
@@ -54,10 +62,18 @@ type AgentRow = {
   sessionId?: string | null
 }
 
-function host(agentsByWorkspace: Record<string, AgentRow[] | Error>, extra: { workspaces?: unknown[] } = {}) {
+function host(
+  agentsByWorkspace: Record<string, AgentRow[] | Error>,
+  extra: { workspaces?: unknown[]; sessions?: Record<string, unknown[] | Error> } = {}
+) {
   return mockHost({
     settings: { sessionsDir: root },
     results: {
+      'agent.listSessions': (params: { workspaceId?: string }) => {
+        const answer = extra.sessions?.[params.workspaceId ?? ''] ?? []
+        if (answer instanceof Error) throw answer
+        return { sessions: answer, truncated: false }
+      },
       'workspace.list': {
         workspaces: extra.workspaces ?? [
           { id: WS_A, kind: 'worktree', name: 'hearturchin', path: '/Users/dom/orca/workspaces/breathing-mind/hearturchin', branch: 'main', hostId: 'local' },
@@ -215,5 +231,116 @@ test('meldet eine geänderte Session-Datei innerhalb von 2 s an das Panel (AK5)'
     worker.posts.some((post) => post.event === 'jobs.changed'),
     `kein jobs.changed nach ${Date.now() - started} ms`
   )
+  await worker.deactivate()
+})
+
+function historySession(sessionId: string, title: string, agent = 'pi') {
+  return {
+    sessionId,
+    agent,
+    title,
+    workspaceId: WS_A,
+    hostId: 'local',
+    branch: 'main',
+    createdAt: 1,
+    updatedAt: 2,
+    messageCount: 3,
+    totalTokens: 4,
+    running: true
+  }
+}
+
+test('Titel kommen exakt über die sessionId aus der Session-Historie, auch bei zwei Pi-Agenten', async () => {
+  const first = join(root, DIR_A, `2026-11-22T11-41-28-639Z_${PI_ID}.jsonl`)
+  const second = join(root, DIR_A, '2026-11-22T12-07-03-618Z_01a20327-18c0-724f-81c5-bcacf59b20e3.jsonl')
+  writeFileSync(first, inPlan)
+  writeFileSync(second, session())
+  // Die CLI kennt beide Pi-Agenten, kann sie aber nicht unterscheiden; sie darf nicht greifen.
+  cliAgents = {
+    agents: [
+      { agent: 'pi', worktreeId: 'p::/Users/dom/orca/workspaces/breathing-mind/hearturchin', title: 'Falsch 1' },
+      { agent: 'pi', worktreeId: 'p::/Users/dom/orca/workspaces/breathing-mind/hearturchin', title: 'Falsch 2' }
+    ]
+  }
+  const worker = await mountWorker(main, {
+    host: host(
+      {
+        [WS_A]: [
+          { terminalId: null, title: null, agent: 'pi', state: 'working', stateStartedAt: 1, sessionId: first },
+          { terminalId: null, title: null, agent: 'pi', state: 'done', stateStartedAt: 2, sessionId: second }
+        ]
+      },
+      {
+        sessions: {
+          [WS_A]: [
+            // Orcas Historie nennt Pi-Sessions mit ihrer ID, agents.list mit dem Dateipfad.
+            historySession('01a20327-18c0-724f-81c5-bcacf59b20e3', 'Designvorgaben definieren und laufend testen'),
+            historySession(PI_ID, 'Orca-Plugin für Job-Workflow und Phase'),
+            historySession('/anders.jsonl', 'Fremde Session')
+          ]
+        }
+      }
+    )
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.deepEqual(
+    groups[0].jobs.map((job) => job.title),
+    ['Orca-Plugin für Job-Workflow und Phase', 'Designvorgaben definieren und laufend testen']
+  )
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('ohne Treffer in der Historie greift die CLI nur bei genau einem Agenten dieser Art im Workspace', async () => {
+  cliAgents = {
+    agents: [
+      { agent: 'claude', worktreeId: 'p::/Users/dom/orca/workspaces/breathing-mind/BM-225', title: 'BM-225 (w3)' },
+      { agent: 'claude', worktreeId: 'p::/Users/dom/orca/workspaces/breathing-mind/hearturchin', title: 'Claude A' },
+      { agent: 'claude', worktreeId: 'p::/Users/dom/orca/workspaces/breathing-mind/hearturchin', title: 'Claude B' },
+      { agent: 'pi', worktreeId: 'p::/Users/dom/orca/workspaces/breathing-mind/hearturchin', title: 'Einziger Pi' }
+    ]
+  }
+  const worker = await mountWorker(main, {
+    host: host({
+      [WS_A]: [
+        { terminalId: null, title: null, agent: 'claude', state: 'done', stateStartedAt: 1, sessionId: null },
+        { terminalId: null, title: null, agent: 'claude', state: 'done', stateStartedAt: 2, sessionId: null },
+        { terminalId: null, title: null, agent: 'pi', state: 'done', stateStartedAt: 3, sessionId: 'nicht-in-historie' }
+      ],
+      [WS_B]: [{ terminalId: null, title: null, agent: 'claude', state: 'working', stateStartedAt: 4, sessionId: null }]
+    })
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.deepEqual(
+    groups.map((group) => group.jobs.map((job) => job.title)),
+    [['claude', 'claude', 'Einziger Pi'], ['BM-225 (w3)']]
+  )
+  await worker.deactivate()
+})
+
+test('ein Ordner-Workspace wird in der CLI über seine ID gefunden', async () => {
+  cliAgents = { agents: [{ agent: 'claude', worktreeId: 'folder:abc', title: 'Security check' }] }
+  const worker = await mountWorker(main, {
+    host: host(
+      { 'folder:abc': [{ terminalId: null, title: null, agent: 'claude', state: 'done', stateStartedAt: 1, sessionId: null }] },
+      { workspaces: [{ id: 'folder:abc', kind: 'folder', name: 'Security check', path: '/Users/dom/.orca/bots/security-check', branch: null, hostId: null }] }
+    )
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.equal(groups[0].jobs[0].title, 'Security check')
+  await worker.deactivate()
+})
+
+test('fallen Historie und CLI aus, bleibt die Agent-Art als Name', async () => {
+  cliAgents = new Error('orca nicht gefunden')
+  const worker = await mountWorker(main, {
+    host: host(
+      { [WS_A]: [{ terminalId: null, title: null, agent: 'pi', state: 'done', stateStartedAt: 1, sessionId: 'x' }] },
+      { sessions: { [WS_A]: hostError('action_failed', 'Historie kaputt') } }
+    )
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.equal(groups[0].jobs[0].title, 'pi')
+  assert.equal(groups[0].error, undefined)
   await worker.deactivate()
 })

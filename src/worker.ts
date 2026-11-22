@@ -3,6 +3,7 @@
 import type { OrcaWorkerApi } from 'orca/worker'
 import type { AgentState, Job, JobGroup, JobsSnapshot, JobWorkflow } from './protocol'
 import { DEFAULT_SESSIONS_DIR, SessionIndex, expandHome, readWorkflowStack, watchSessions } from './sessions'
+import { cliAgents, inWorkspace, uniqueCliTitle, type CliAgent } from './titles'
 
 /** Wartezeit, mit der mehrere Schreibvorgänge zu einer Meldung gebündelt werden. */
 const CHANGE_DELAY_MS = 500
@@ -32,7 +33,55 @@ function workflowOf(path: string | null): JobWorkflow {
   return readWorkflowStack(path) ?? 'unknown'
 }
 
-function jobsOf(workspace: WorkspaceRow, agents: AgentRow[], index: SessionIndex): Job[] {
+/** Titel aus Orcas Session-Historie für diesen Workspace, nach `sessionId`. */
+async function historyTitles(orca: OrcaWorkerApi, workspace: WorkspaceRow, agents: AgentRow[]): Promise<Map<string, string>> {
+  const titles = new Map<string, string>()
+  if (!agents.some((agent) => agent.sessionId)) return titles
+  try {
+    const { sessions } = await orca.host.call('agent.listSessions', { workspaceId: workspace.id, limit: 200 })
+    for (const entry of sessions) if (entry.title.trim()) titles.set(entry.sessionId, entry.title)
+  } catch {
+    // Ohne Historie bleibt der Ausweg über die CLI.
+  }
+  return titles
+}
+
+/**
+ * Schlüssel, unter denen die Historie eine Session nennen kann. Bei Pi liefert `agents.list` den
+ * Pfad der Session-Datei, die Historie die Pi-Session-ID aus dem Dateinamen
+ * (`…/2026-11-22T16-36-23-971Z_01a2041d-….jsonl` → `01a2041d-…`).
+ */
+function historyKeys(sessionId: string | null | undefined): string[] {
+  if (!sessionId) return []
+  const name = sessionId.slice(sessionId.lastIndexOf('/') + 1)
+  if (!name.endsWith('.jsonl') || !name.includes('_')) return [sessionId]
+  return [sessionId, name.slice(name.lastIndexOf('_') + 1, -'.jsonl'.length)]
+}
+
+function historyTitle(agent: AgentRow, history: Map<string, string>): string | undefined {
+  for (const key of historyKeys(agent.sessionId)) {
+    const title = history.get(key)
+    if (title) return title
+  }
+  return undefined
+}
+
+function titleOf(agent: AgentRow, history: Map<string, string>, cli: CliAgent[], agents: AgentRow[]): string {
+  if (agent.title) return agent.title
+  const exact = historyTitle(agent, history)
+  if (exact) return exact
+  const sameKind = agents.filter((other) => other.agent === agent.agent).length
+  const fromCli = sameKind === 1 ? uniqueCliTitle(cli, agent.agent) : null
+  return fromCli ?? agent.agent ?? 'Agent'
+}
+
+function jobsOf(
+  workspace: WorkspaceRow,
+  agents: AgentRow[],
+  index: SessionIndex,
+  history: Map<string, string>,
+  cli: CliAgent[]
+): Job[] {
   const paths = agents.map((agent) => (agent.agent === 'pi' ? index.find(agent.sessionId) : null))
   const pi = agents.filter((agent) => agent.agent === 'pi')
   // Ohne passende sessionId nur dann die neueste Session des Workspaces, wenn sie eindeutig
@@ -40,7 +89,7 @@ function jobsOf(workspace: WorkspaceRow, agents: AgentRow[], index: SessionIndex
   const fallback = pi.length === 1 ? index.newestFor(workspace.path) : null
   return agents.map((agent, position) => ({
     key: agent.terminalId ?? `${workspace.id}#${position}`,
-    title: agent.title ?? agent.agent ?? 'Agent',
+    title: titleOf(agent, history, cli, agents),
     agent: agent.agent,
     state: agent.state,
     stateStartedAt: agent.stateStartedAt,
@@ -53,6 +102,7 @@ export async function listJobs(orca: OrcaWorkerApi): Promise<JobsSnapshot> {
   const index = new SessionIndex(dir)
   const { workspaces } = (await orca.host.call('workspace.list', {})) as { workspaces: WorkspaceRow[] }
   const groups: JobGroup[] = []
+  let cli: CliAgent[] | null = null
   for (const workspace of workspaces) {
     // Nur dieser Rechner: Sessions anderer Hosts liegen nicht im lokalen Sessions-Ordner.
     if (workspace.hostId !== null && workspace.hostId !== 'local') continue
@@ -61,7 +111,11 @@ export async function listJobs(orca: OrcaWorkerApi): Promise<JobsSnapshot> {
         agents: AgentRow[]
       }
       if (agents.length === 0) continue
-      groups.push({ workspaceId: workspace.id, name: workspace.name, jobs: jobsOf(workspace, agents, index) })
+      const history = await historyTitles(orca, workspace, agents)
+      const needsCli = agents.some((agent) => !agent.title && !historyTitle(agent, history))
+      if (needsCli && cli === null) cli = await cliAgents()
+      const local = (cli ?? []).filter((agent) => inWorkspace(agent, workspace))
+      groups.push({ workspaceId: workspace.id, name: workspace.name, jobs: jobsOf(workspace, agents, index, history, local) })
     } catch (error) {
       groups.push({ workspaceId: workspace.id, name: workspace.name, jobs: [], error: errorMessage(error) })
     }
