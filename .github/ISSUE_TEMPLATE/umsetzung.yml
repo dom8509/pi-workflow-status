@@ -1,0 +1,31 @@
+name: Umsetzung
+description: Eine Änderung am Plugin mit Akzeptanzkriterien
+body:
+  - type: textarea
+    id: ziel
+    attributes:
+      label: Ziel und Kontext
+    validations:
+      required: true
+  - type: textarea
+    id: umfang
+    attributes:
+      label: Umfang und Ausschlüsse
+    validations:
+      required: true
+  - type: textarea
+    id: ak
+    attributes:
+      label: Akzeptanzkriterien
+      description: Je Zeile ein AK mit ID und Nachweisart, zum Beispiel "AK1 … — Nachweis Unit-Test".
+    validations:
+      required: true
+  - type: dropdown
+    id: abnahme
+    attributes:
+      label: Nutzerabnahme erforderlich
+      options:
+        - ja
+        - nein
+    validations:
+      required: true
