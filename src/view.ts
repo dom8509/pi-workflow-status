@@ -93,6 +93,25 @@ function levelPipeline(levels: WorkflowLevel[], depth: number): Pipeline {
   }
 }
 
+/** Farbtöne der bekannten Workflows; Coding blau, Package violett, ResultCheck türkis. */
+const KNOWN_HUES: Record<string, number> = {
+  Coding: 215,
+  Package: 270,
+  ResultCheck: 175,
+  Research: 30,
+  Analysis: 330,
+  Extraction: 95
+}
+
+/** Fester Farbton (0–359) eines Workflows; unbekannte Namen bekommen einen aus ihrem Namen. */
+export function workflowHue(name: string): number {
+  const known = KNOWN_HUES[name]
+  if (known !== undefined) return known
+  let hash = 0
+  for (const char of name) hash = (hash * 31 + char.codePointAt(0)!) >>> 0
+  return hash % 360
+}
+
 export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -152,7 +171,7 @@ function renderPipeline(pipeline: Pipeline): string {
 }
 
 function pipelineHeader(pipeline: Pipeline): string {
-  return `<h2>${escapeHtml(pipeline.workflow)}</h2>
+  return `<h2 style="--hue: ${workflowHue(pipeline.workflow)}"><span class="hue-dot"></span>${escapeHtml(pipeline.workflow)}</h2>
 <p class="route">${pipeline.stages.map((stage) => escapeHtml(stage.id)).join(' → ')}</p>`
 }
 
@@ -170,7 +189,10 @@ function chipsOf(item: ActivityItem): string {
     return `<span class="no-workflow">${escapeHtml(item.summary)}</span>`
   }
   return `<span class="chips">${workflow
-    .map((level) => `<span class="chip">${escapeHtml(level.workflow)} · ${escapeHtml(level.stage)}</span>`)
+    .map(
+      (level) =>
+        `<span class="chip" style="--hue: ${workflowHue(level.workflow)}">${escapeHtml(level.workflow)} · ${escapeHtml(level.stage)}</span>`
+    )
     .join('')}</span>`
 }
 

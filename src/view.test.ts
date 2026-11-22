@@ -1,7 +1,7 @@
 // Prüft das Ansichtsmodell des HTML-Panels: Activity-Liste, Auswahl und Pipeline.
 import { assert, test } from 'orca/testing'
 import type { JobsSnapshot } from './protocol'
-import { activityOf, pipelineOf, renderPanel, selectJob, visibleItems } from './view'
+import { activityOf, pipelineOf, renderPanel, selectJob, visibleItems, workflowHue } from './view'
 
 const codingStages = [
   { id: 'understand', description: 'Collect the facts' },
@@ -137,7 +137,7 @@ test('eine aktuelle Phase außerhalb der Definition bleibt mit ihrem Prüf-Workf
 test('ein Job mit Workflow zeigt je Ebene einen Chip, einer ohne einen grauen Hinweis (AK8)', () => {
   const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 0, workflowsOnly: false })
   assert.ok(
-    /<span class="chips"><span class="chip">Coding · plan<\/span><span class="chip">ResultCheck · check<\/span><\/span>/.test(html),
+    /<span class="chips"><span class="chip" style="--hue: 215">Coding · plan<\/span><span class="chip" style="--hue: 175">ResultCheck · check<\/span><\/span>/.test(html),
     'Chips fehlen'
   )
   assert.ok(html.includes('<span class="no-workflow">no workflow</span>'))
@@ -166,4 +166,20 @@ test('Liste und Pipeline liegen in eigenen Scrollbereichen unter festen Übersch
   const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 0, workflowsOnly: false })
   assert.ok(/<section class="activity">\s*<header[^]*<\/header>\s*<ul class="jobs scroll">/.test(html), 'Activity-Bereich')
   assert.ok(/<section class="detail">\s*<header[^]*Coding[^]*<\/header>\s*<div class="scroll">/.test(html), 'Pipeline-Bereich')
+})
+
+test('jeder Workflow hat eine feste Farbe: bekannte nach Tabelle, andere aus dem Namen (AK11)', () => {
+  assert.equal(workflowHue('Coding'), 215)
+  assert.equal(workflowHue('Package'), 270)
+  assert.equal(workflowHue('ResultCheck'), 175)
+  const custom = workflowHue('MyCustomFlow')
+  assert.equal(workflowHue('MyCustomFlow'), custom)
+  assert.ok(Number.isInteger(custom) && custom >= 0 && custom < 360)
+  assert.notEqual(workflowHue('MyCustomFlow'), workflowHue('OtherFlow'))
+})
+
+test('die Pipeline-Überschrift trägt die Farbe ihres Workflows (AK11)', () => {
+  const html = renderPanel({ snapshot, selected: 'a2', error: null, now: 0, workflowsOnly: false })
+  assert.ok(html.includes('<h2 style="--hue: 215"><span class="hue-dot"></span>Coding</h2>'))
+  assert.ok(html.includes('<h2 style="--hue: 175"><span class="hue-dot"></span>ResultCheck</h2>'))
 })
