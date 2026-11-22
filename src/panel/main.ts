@@ -23,6 +23,10 @@ let selected: string | null = null
 let workflowsOnly = true
 const FILTER_KEY = 'workflowsOnly'
 const SAVE_ERROR = 'Could not save the filter'
+/** Zuletzt im Speicher bestätigter Filterwert und Zähler der Speichervorgänge. */
+let savedWorkflowsOnly = workflowsOnly
+let saveGeneration = 0
+let confirmedGeneration = 0
 let sequence = 0
 
 let lastHtml = ''
@@ -74,19 +78,29 @@ async function refresh(): Promise<void> {
 root.addEventListener('change', (event) => {
   const input = event.target as HTMLInputElement
   if (input.dataset.filter !== 'workflows-only') return
-  const previous = workflowsOnly
   workflowsOnly = input.checked
   draw()
-  // Schlägt das Speichern fehl, gilt wieder die gespeicherte Wahl, und das Panel sagt warum.
-  orca.storage.set(FILTER_KEY, workflowsOnly).then(
+  // Nur die jüngste Änderung zählt. Schlägt sie fehl, gilt wieder der zuletzt bestätigte Wert,
+  // und das Panel sagt warum; ältere Rückmeldungen ändern nichts mehr.
+  const generation = ++saveGeneration
+  const value = workflowsOnly
+  orca.storage.set(FILTER_KEY, value).then(
     () => {
+      // Auch eine ältere, erst jetzt bestätigte Änderung steht im Speicher, solange keine jüngere
+      // schon bestätigt ist.
+      if (generation > confirmedGeneration) {
+        confirmedGeneration = generation
+        savedWorkflowsOnly = value
+      }
+      if (generation !== saveGeneration) return
       if (error?.startsWith(SAVE_ERROR)) {
         error = null
         draw()
       }
     },
     (cause: unknown) => {
-      workflowsOnly = previous
+      if (generation !== saveGeneration) return
+      workflowsOnly = savedWorkflowsOnly
       error = `${SAVE_ERROR}: ${cause instanceof Error ? cause.message : String(cause)}`
       draw()
     }
@@ -120,7 +134,10 @@ keepAlive()
 async function loadFilter(): Promise<void> {
   try {
     const stored = await orca.storage.get(FILTER_KEY)
-    if (typeof stored === 'boolean') workflowsOnly = stored
+    if (typeof stored === 'boolean') {
+      workflowsOnly = stored
+      savedWorkflowsOnly = stored
+    }
   } catch {
     // Ohne Speicher gilt die Vorgabe.
   }
