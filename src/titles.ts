@@ -40,15 +40,51 @@ let readCliAgents: () => Promise<unknown> = readCliAgentsFromOrca
 /** Nur für Tests: ersetzt den Aufruf der CLI. */
 export function setCliAgentsReader(reader: () => Promise<unknown>): void {
   readCliAgents = reader
+  cache = null
+  pending = null
 }
 
-/** Agenten aus der CLI; ein Fehler ergibt eine leere Liste. */
+/** Länger wartet `jobs.list` nicht auf die CLI, damit die 2-s-Frist für Phasenwechsel hält. */
+export const CLI_BUDGET_MS = 1500
+/** So lange gilt eine Antwort der CLI; Tab-Titel ändern sich selten. */
+const CLI_CACHE_MS = 30000
+
+let cache: { at: number; agents: CliAgent[] } | null = null
+let pending: Promise<CliAgent[]> | null = null
+
+function fetchCliAgents(): Promise<CliAgent[]> {
+  if (!pending) {
+    pending = readCliAgents()
+      .then((result) => {
+        const agents = (result as { agents?: unknown } | null)?.agents
+        const list = Array.isArray(agents) ? (agents as CliAgent[]) : []
+        cache = { at: Date.now(), agents: list }
+        return list
+      })
+      .catch(() => [] as CliAgent[])
+      .finally(() => {
+        pending = null
+      })
+  }
+  return pending
+}
+
+/**
+ * Agenten aus der CLI. Ein Fehler ergibt eine leere Liste; braucht die CLI länger als
+ * `CLI_BUDGET_MS`, gilt die letzte Antwort oder eine leere Liste, und die laufende Abfrage
+ * füllt den Zwischenspeicher für den nächsten Durchlauf.
+ */
 export async function cliAgents(): Promise<CliAgent[]> {
+  if (cache && Date.now() - cache.at < CLI_CACHE_MS) return cache.agents
+  const fallback = cache?.agents ?? []
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const budget = new Promise<CliAgent[]>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), CLI_BUDGET_MS)
+  })
   try {
-    const result = (await readCliAgents()) as { agents?: unknown } | null
-    return Array.isArray(result?.agents) ? (result.agents as CliAgent[]) : []
-  } catch {
-    return []
+    return await Promise.race([fetchCliAgents(), budget])
+  } finally {
+    clearTimeout(timer)
   }
 }
 

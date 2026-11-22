@@ -2,6 +2,7 @@
 import { assert, hostError, mockHost, mount, test } from 'orca/testing'
 import type { JobsSnapshot } from './protocol'
 import * as panel from './panel'
+import { setKeepAliveMs } from './panel'
 
 const snapshot: JobsSnapshot = {
   sessionsDir: '/Users/dom/.pi/agent/sessions',
@@ -34,37 +35,30 @@ const snapshot: JobsSnapshot = {
   ]
 }
 
-function rowsOf(view: Awaited<ReturnType<typeof mount>>, workspace: string) {
-  const table = view.find({ type: 'Table', label: `Agents in ${workspace}` })
-  assert.ok(table, `keine Tabelle für ${workspace}`)
-  return (table.props.rows as { key: string; cells: Record<string, unknown> }[]).map((row) => ({
-    key: row.key,
-    ...row.cells
-  }))
+/** Was eine Job-Zeile zeigt: Titel, Workflow, Status und die Zeit seit dem Wechsel. */
+function jobOf(view: Awaited<ReturnType<typeof mount>>, key: string) {
+  assert.ok(view.find({ testId: `${key}:title` }), `keine Zeile ${key}`)
+  return {
+    title: view.findAll({ testId: `${key}:title` })[0]?.text,
+    workflow: view.findAll({ testId: `${key}:workflow` })[0]?.text,
+    state: view.findAll({ testId: `${key}:state` })[0]?.text,
+    since: (view.findAll({ testId: `${key}:since` })[0]?.props as { at?: number } | undefined)?.at
+  }
 }
 
-test('zeigt pro Workspace eine Tabelle mit Workflow und Phase (AK1, AK2, AK4)', async () => {
+test('zeigt pro Workspace die Jobs mit Workflow, Phase, Status und Zeit (AK1, AK2, AK4)', async () => {
   const view = await mount(panel, { host: mockHost({ requests: { 'jobs.list': snapshot } }) })
-  assert.deepEqual(rowsOf(view, 'hearturchin'), [
-    {
-      key: 't1',
-      agent: 'Coordinator',
-      workflow: 'Coding › plan (3/6, next: implement) ⟶ ResultCheck › check (1/2)',
-      state: 'working',
-      since: { type: 'relative', at: 1000, format: 'short' }
-    },
-    { key: 't2', agent: 'Idle pi', workflow: '—', state: 'done', since: { type: 'relative', at: 900, format: 'short' } },
-    { key: 't3', agent: 'Lost pi', workflow: 'unknown', state: 'done', since: { type: 'relative', at: 900, format: 'short' } }
-  ])
-  assert.deepEqual(rowsOf(view, 'BM-225'), [
-    {
-      key: 't4',
-      agent: 'BM-225 (w3)',
-      workflow: 'no workflow',
-      state: 'blocked',
-      since: { type: 'relative', at: 2000, format: 'short' }
-    }
-  ])
+  assert.deepEqual(jobOf(view, 't1'), {
+    title: 'Coordinator',
+    workflow: 'Coding › plan (3/6, next: implement) ⟶ ResultCheck › check (1/2)',
+    state: 'working',
+    since: 1000
+  })
+  assert.deepEqual(jobOf(view, 't2'), { title: 'Idle pi', workflow: '—', state: 'done', since: 900 })
+  assert.deepEqual(jobOf(view, 't3'), { title: 'Lost pi', workflow: 'unknown', state: 'done', since: 900 })
+  assert.deepEqual(jobOf(view, 't4'), { title: 'BM-225 (w3)', workflow: 'no workflow', state: 'blocked', since: 2000 })
+  assert.equal(view.find({ testId: 'group:ws-a' })?.text, 'hearturchin')
+  assert.equal(view.find({ testId: 'group:ws-b' })?.text, 'BM-225')
   assert.ok(view.find({ text: /kaputt/ }), 'Fehler des Workspaces fehlt')
   assert.deepEqual(view.errors, [])
   assert.deepEqual(view.warnings, [])
@@ -88,7 +82,7 @@ test('fragt bei Agent-Status, Workspace-Wechsel und geänderter Session neu ab (
 
   await view.post('jobs.changed', { at: 1 })
   assert.equal(calls, 2)
-  assert.ok(view.find({ type: 'Table', label: 'Agents in hearturchin' }))
+  assert.ok(view.find({ testId: 't1:title' }))
 
   await view.emit('agent.status.changed', {
     workspaceId: 'ws-a',
@@ -115,4 +109,21 @@ test('zeigt einen Fehler, wenn der Worker nicht antwortet', async () => {
   const view = await mount(panel, { host })
   assert.ok(view.find({ type: 'Callout', text: /worker down/ }))
   await view.unmount()
+})
+
+test('solange das Panel sichtbar ist, fragt es regelmäßig nach und hält so den Worker wach (AK5)', async () => {
+  setKeepAliveMs(40)
+  let calls = 0
+  const host = mockHost({ requests: { 'jobs.list': () => ((calls += 1), snapshot) } })
+  const view = await mount(panel, { host })
+  const started = Date.now()
+  while (calls < 3 && Date.now() - started < 2000) await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.ok(calls >= 3, `nur ${calls} Abfragen`)
+  view.setVisible(false)
+  await view.settled()
+  const hidden = calls
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.ok(calls <= hidden + 1, `verstecktes Panel fragte ${calls - hidden}-mal nach`)
+  await view.unmount()
+  setKeepAliveMs(15000)
 })

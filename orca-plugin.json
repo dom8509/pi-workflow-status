@@ -1,6 +1,6 @@
 {
   "manifestVersion": 2,
-  "id": "orca-workflow-status",
+  "id": "pi-workflow-status",
   "name": "Workflow Status",
   "version": "0.1.0",
   "description": "Shows the Pi workflow and stage of every agent in every workspace.",

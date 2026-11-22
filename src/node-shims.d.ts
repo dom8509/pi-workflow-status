@@ -14,6 +14,8 @@ declare module 'node:fs' {
   export function writeFileSync(path: string, data: string): void
   export function appendFileSync(path: string, data: string): void
   export function utimesSync(path: string, atime: number, mtime: number): void
+  export function symlinkSync(target: string, path: string): void
+  export function realpathSync(path: string): string
   export function rmSync(path: string, options?: { recursive?: boolean; force?: boolean }): void
   export function watch(
     path: string,

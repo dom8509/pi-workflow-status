@@ -1,5 +1,5 @@
 // Findet Pi-Session-Dateien. Gelesen wird ausschließlich unterhalb des Sessions-Ordners.
-import { existsSync, readdirSync, readFileSync, statSync, watch } from 'node:fs'
+import { readdirSync, readFileSync, realpathSync, statSync, watch } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import { parseWorkflowStack, type WorkflowLevel } from './parse'
@@ -18,10 +18,18 @@ export function sessionDirName(cwd: string): string {
   return `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`
 }
 
+/**
+ * Liegt die Datei nach Auflösen aller symbolischen Links unterhalb des Ordners? Ein Link, der aus
+ * dem Sessions-Ordner hinauszeigt, zählt als außerhalb; eine fehlende Datei ebenso.
+ */
 function isInside(dir: string, file: string): boolean {
-  const base = resolve(dir)
-  const target = resolve(file)
-  return target.startsWith(base.endsWith(sep) ? base : base + sep)
+  try {
+    const base = realpathSync(resolve(dir))
+    const target = realpathSync(resolve(file))
+    return target.startsWith(base.endsWith(sep) ? base : base + sep)
+  } catch {
+    return false
+  }
 }
 
 function jsonlFiles(dir: string): string[] {
@@ -55,7 +63,8 @@ export class SessionIndex {
       for (const name of jsonlFiles(sub)) {
         // Dateiname: <Zeitstempel>_<Session-ID>.jsonl
         const id = name.slice(name.lastIndexOf('_') + 1, -'.jsonl'.length)
-        if (id) this.byId.set(id, join(sub, name))
+        const path = join(sub, name)
+        if (id && isInside(this.dir, path)) this.byId.set(id, path)
       }
     }
     return this.byId
@@ -68,9 +77,7 @@ export class SessionIndex {
   find(sessionId: string | null | undefined): string | null {
     if (!sessionId) return null
     if (isAbsolute(sessionId)) {
-      return sessionId.endsWith('.jsonl') && isInside(this.dir, sessionId) && existsSync(sessionId)
-        ? sessionId
-        : null
+      return sessionId.endsWith('.jsonl') && isInside(this.dir, sessionId) ? sessionId : null
     }
     return this.index().get(sessionId) ?? null
   }
@@ -81,6 +88,7 @@ export class SessionIndex {
     let newest: { path: string; mtime: number } | null = null
     for (const name of jsonlFiles(dir)) {
       const path = join(dir, name)
+      if (!isInside(this.dir, path)) continue
       try {
         const mtime = statSync(path).mtimeMs
         if (!newest || mtime > newest.mtime) newest = { path, mtime }
@@ -103,9 +111,15 @@ export function readWorkflowStack(path: string): WorkflowLevel[] | null {
 
 /**
  * Ruft `onChange` auf, sobald eine Session-Datei geschrieben wurde, gebündelt über `delayMs`.
- * Gibt eine Funktion zum Beenden zurück; ein fehlender Ordner liefert `null`.
+ * Gibt eine Funktion zum Beenden zurück; ein fehlender Ordner liefert `null`. Fällt der Watcher
+ * später aus, ruft er `onFailure`, damit der Aufrufer ihn neu anlegen kann.
  */
-export function watchSessions(dir: string, onChange: () => void, delayMs: number): (() => void) | null {
+export function watchSessions(
+  dir: string,
+  onChange: () => void,
+  delayMs: number,
+  onFailure: () => void = () => undefined
+): (() => void) | null {
   let timer: ReturnType<typeof setTimeout> | null = null
   try {
     const watcher = watch(dir, { recursive: true, persistent: false }, (_event, filename) => {
@@ -116,11 +130,16 @@ export function watchSessions(dir: string, onChange: () => void, delayMs: number
         onChange()
       }, delayMs)
     })
-    watcher.on('error', () => undefined)
-    return () => {
+    const stop = () => {
       if (timer) clearTimeout(timer)
+      timer = null
       watcher.close()
     }
+    watcher.on('error', () => {
+      stop()
+      onFailure()
+    })
+    return stop
   } catch {
     return null
   }

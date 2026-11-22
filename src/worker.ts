@@ -101,26 +101,29 @@ export async function listJobs(orca: OrcaWorkerApi): Promise<JobsSnapshot> {
   const dir = await sessionsDir(orca)
   const index = new SessionIndex(dir)
   const { workspaces } = (await orca.host.call('workspace.list', {})) as { workspaces: WorkspaceRow[] }
-  const groups: JobGroup[] = []
-  let cli: CliAgent[] | null = null
-  for (const workspace of workspaces) {
-    // Nur dieser Rechner: Sessions anderer Hosts liegen nicht im lokalen Sessions-Ordner.
-    if (workspace.hostId !== null && workspace.hostId !== 'local') continue
-    try {
-      const { agents } = (await orca.host.call('agents.list', { workspaceId: workspace.id })) as {
-        agents: AgentRow[]
-      }
-      if (agents.length === 0) continue
-      const history = await historyTitles(orca, workspace, agents)
-      const needsCli = agents.some((agent) => !agent.title && !historyTitle(agent, history))
-      if (needsCli && cli === null) cli = await cliAgents()
-      const local = (cli ?? []).filter((agent) => inWorkspace(agent, workspace))
-      groups.push({ workspaceId: workspace.id, name: workspace.name, jobs: jobsOf(workspace, agents, index, history, local) })
-    } catch (error) {
-      groups.push({ workspaceId: workspace.id, name: workspace.name, jobs: [], error: errorMessage(error) })
-    }
-  }
-  return { groups, sessionsDir: dir }
+  // Alle Workspaces parallel; die CLI wird höchstens einmal je Durchlauf gefragt.
+  let cli: Promise<CliAgent[]> | null = null
+  const groups = await Promise.all(
+    workspaces
+      // Nur dieser Rechner: Sessions anderer Hosts liegen nicht im lokalen Sessions-Ordner.
+      .filter((workspace) => workspace.hostId === null || workspace.hostId === 'local')
+      .map(async (workspace): Promise<JobGroup | null> => {
+        try {
+          const { agents } = (await orca.host.call('agents.list', { workspaceId: workspace.id })) as {
+            agents: AgentRow[]
+          }
+          if (agents.length === 0) return null
+          const history = await historyTitles(orca, workspace, agents)
+          const needsCli = agents.some((agent) => !agent.title && !historyTitle(agent, history))
+          if (needsCli && cli === null) cli = cliAgents()
+          const local = needsCli ? (await (cli ?? Promise.resolve([]))).filter((agent) => inWorkspace(agent, workspace)) : []
+          return { workspaceId: workspace.id, name: workspace.name, jobs: jobsOf(workspace, agents, index, history, local) }
+        } catch (error) {
+          return { workspaceId: workspace.id, name: workspace.name, jobs: [], error: errorMessage(error) }
+        }
+      })
+  )
+  return { groups: groups.filter((group): group is JobGroup => group !== null), sessionsDir: dir }
 }
 
 export default function activate(orca: OrcaWorkerApi): void {
@@ -132,7 +135,17 @@ export default function activate(orca: OrcaWorkerApi): void {
     if (dir === watchedDir && stopWatching) return
     stopWatching?.()
     watchedDir = dir
-    stopWatching = watchSessions(dir, () => orca.panels.post('jobs.changed', { at: Date.now() }), CHANGE_DELAY_MS)
+    stopWatching = watchSessions(
+      dir,
+      () => orca.panels.post('jobs.changed', { at: Date.now() }),
+      CHANGE_DELAY_MS,
+      () => {
+        // Beim nächsten jobs.list neu anlegen.
+        stopWatching = null
+        watchedDir = null
+        orca.log(`Watcher für ${dir} ausgefallen`)
+      }
+    )
     if (!stopWatching) orca.log(`Sessions-Ordner nicht beobachtbar: ${dir}`)
   }
 

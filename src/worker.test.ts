@@ -1,7 +1,7 @@
 // Prüft den Worker über `jobs.list` und `jobs.changed`, mit Orca als Mock und echten
 // Session-Dateien in einem temporären Ordner.
 import { afterEach, assert, beforeEach, hostError, mockHost, mountWorker, test } from 'orca/testing'
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as main from './worker'
@@ -222,6 +222,9 @@ test('ein Fehler eines Workspaces lässt die anderen stehen; leere Workspaces un
 test('meldet eine geänderte Session-Datei innerhalb von 2 s an das Panel (AK5)', async () => {
   const worker = await mountWorker(main, { host: host({}) })
   await worker.request('jobs.list')
+  // macOS meldet Dateiereignisse über FSEvents erst, wenn der Watcher-Stream läuft; das dauert
+  // nach dem Anlegen einige Millisekunden. Gemessen wird ab dem Schreiben bei laufendem Watcher.
+  await new Promise((resolve) => setTimeout(resolve, 300))
   const started = Date.now()
   writeFileSync(join(root, DIR_A, `2026-11-22T11-41-28-639Z_${PI_ID}.jsonl`), inPlan)
   while (!worker.posts.some((post) => post.event === 'jobs.changed') && Date.now() - started < 2000) {
@@ -342,5 +345,59 @@ test('fallen Historie und CLI aus, bleibt die Agent-Art als Name', async () => {
   const { groups } = await worker.request('jobs.list')
   assert.equal(groups[0].jobs[0].title, 'pi')
   assert.equal(groups[0].error, undefined)
+  await worker.deactivate()
+})
+
+test('eine Session-Datei, die als Symlink aus dem Sessions-Ordner hinauszeigt, wird nicht gelesen', async () => {
+  const outsideDir = mkdtempSync(join(tmpdir(), 'ows-outside-'))
+  const target = join(outsideDir, 'geheim.jsonl')
+  writeFileSync(target, inPlan)
+  const link = join(root, DIR_A, `2026-11-22T11-41-28-639Z_${PI_ID}.jsonl`)
+  symlinkSync(target, link)
+  const worker = await mountWorker(main, {
+    host: host({
+      [WS_A]: [
+        { terminalId: 't1', title: 'Per ID', agent: 'pi', state: 'working', stateStartedAt: 1, sessionId: PI_ID },
+        { terminalId: 't2', title: 'Per Pfad', agent: 'pi', state: 'working', stateStartedAt: 1, sessionId: link }
+      ]
+    })
+  })
+  const { groups } = await worker.request('jobs.list')
+  assert.deepEqual(groups[0].jobs.map((job) => job.workflow), ['unknown', 'unknown'])
+  rmSync(outsideDir, { recursive: true, force: true })
+  await worker.deactivate()
+})
+
+test('eine hängende CLI verzögert jobs.list um höchstens 1,5 s und lässt die Agent-Art stehen (AK5)', async () => {
+  setCliAgentsReader(() => new Promise(() => undefined))
+  const worker = await mountWorker(main, {
+    host: host({ [WS_A]: [{ terminalId: 't1', title: null, agent: 'claude', state: 'done', stateStartedAt: 1, sessionId: null }] })
+  })
+  const started = Date.now()
+  const { groups } = await worker.request('jobs.list')
+  const elapsed = Date.now() - started
+  assert.ok(elapsed < 2000, `jobs.list dauerte ${elapsed} ms`)
+  assert.equal(groups[0].jobs[0].title, 'claude')
+  await worker.deactivate()
+})
+
+test('ein anfangs fehlender Sessions-Ordner wird beim nächsten jobs.list beobachtet (AK5)', async () => {
+  const later = join(root, 'spaeter')
+  const worker = await mountWorker(main, {
+    host: mockHost({
+      settings: { sessionsDir: later },
+      results: { 'workspace.list': { workspaces: [], truncated: false } }
+    })
+  })
+  await worker.request('jobs.list')
+  mkdirSync(join(later, DIR_A), { recursive: true })
+  await worker.request('jobs.list')
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  const started = Date.now()
+  writeFileSync(join(later, DIR_A, `2026-11-22T11-41-28-639Z_${PI_ID}.jsonl`), inPlan)
+  while (!worker.posts.some((post) => post.event === 'jobs.changed') && Date.now() - started < 2000) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  assert.ok(worker.posts.some((post) => post.event === 'jobs.changed'), 'kein jobs.changed')
   await worker.deactivate()
 })
