@@ -22,6 +22,7 @@ let selected: string | null = null
 /** Filter „Workflows only“; Vorgabe an, die Wahl liegt im Plugin-Speicher (`storage:own`). */
 let workflowsOnly = true
 const FILTER_KEY = 'workflowsOnly'
+const SAVE_ERROR = 'Could not save the filter'
 let sequence = 0
 
 let lastHtml = ''
@@ -73,9 +74,23 @@ async function refresh(): Promise<void> {
 root.addEventListener('change', (event) => {
   const input = event.target as HTMLInputElement
   if (input.dataset.filter !== 'workflows-only') return
+  const previous = workflowsOnly
   workflowsOnly = input.checked
   draw()
-  void orca.storage.set(FILTER_KEY, workflowsOnly).catch(() => undefined)
+  // Schlägt das Speichern fehl, gilt wieder die gespeicherte Wahl, und das Panel sagt warum.
+  orca.storage.set(FILTER_KEY, workflowsOnly).then(
+    () => {
+      if (error?.startsWith(SAVE_ERROR)) {
+        error = null
+        draw()
+      }
+    },
+    (cause: unknown) => {
+      workflowsOnly = previous
+      error = `${SAVE_ERROR}: ${cause instanceof Error ? cause.message : String(cause)}`
+      draw()
+    }
+  )
 })
 
 root.addEventListener('click', (event) => {

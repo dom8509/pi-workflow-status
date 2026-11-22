@@ -193,9 +193,6 @@ export function renderPanel(model: PanelModel): string {
     .filter((group) => group.error)
     .map((group) => `<div class="callout warning">${escapeHtml(group.name)}: ${escapeHtml(group.error ?? '')}</div>`)
     .join('')
-  if (items.length === 0) {
-    return `${error}${failures}<p class="muted">No agents. No workspace on this computer has a running agent.</p>`
-  }
   const visible = visibleItems(items, model.workflowsOnly)
   const selected = selectJob(visible, model.selected)
   const list = visible
@@ -207,7 +204,12 @@ export function renderPanel(model: PanelModel): string {
 </button></li>`
     )
     .join('')
-  const empty = visible.length === 0 ? '<li class="muted">No job is running a workflow right now.</li>' : ''
+  const empty =
+    items.length === 0
+      ? '<li class="muted">No agents. No workspace on this computer has a running agent.</li>'
+      : visible.length === 0
+        ? '<li class="muted">No job is running a workflow right now.</li>'
+        : ''
   const header = `<header class="section-head activity-head">
   <h2>Activity <span class="count">${visible.length}/${items.length}</span></h2>
   <label class="filter"><input type="checkbox" data-filter="workflows-only"${model.workflowsOnly ? ' checked' : ''}> Workflows only</label>

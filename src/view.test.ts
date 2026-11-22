@@ -105,7 +105,11 @@ test('das HTML maskiert Titel und zeigt Liste und Pipeline des ausgewählten Job
 })
 
 test('ohne Jobs und bei einem Fehler zeigt das Panel einen Hinweis', () => {
-  assert.ok(renderPanel({ snapshot: { sessionsDir: '/s', groups: [] }, selected: null, error: null, now: 0, workflowsOnly: false }).includes('No agents'))
+  const none = renderPanel({ snapshot: { sessionsDir: '/s', groups: [] }, selected: null, error: null, now: 0, workflowsOnly: true })
+  assert.ok(none.includes('No agents'))
+  // Auch ohne Jobs bleiben Zähler und Schalter bedienbar (AK9).
+  assert.ok(none.includes('<span class="count">0/0</span>'))
+  assert.ok(none.includes('data-filter="workflows-only" checked'))
   assert.ok(renderPanel({ snapshot: null, selected: null, error: 'worker down', now: 0, workflowsOnly: false }).includes('worker down'))
   assert.ok(renderPanel({ snapshot: null, selected: null, error: null, now: 0, workflowsOnly: false }).includes('Loading'))
 })
