@@ -2,7 +2,7 @@
   "manifestVersion": 2,
   "id": "pi-workflow-status",
   "name": "PI Workflow Status",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "See which Pi workflow and stage every agent in Orca is in: an Activity list of all agents with workflow chips, and the selected agent's pipeline with done, current and pending stages.",
   "license": "MIT",
   "repository": "https://github.com/dom8509/pi-workflow-status",
@@ -34,7 +34,7 @@
       {
         "id": "workflow-status",
         "title": "PI Workflow Status",
-        "icon": "layers",
+        "icon": "branch",
         "entry": "src/panel/main.ts"
       }
     ],
