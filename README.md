@@ -1,7 +1,8 @@
 # PI Workflow Status
 
-An [Orca](https://onorca.dev) plugin that shows, for every agent in every local workspace, which
-[Pi](https://www.npmjs.com/package/pi-agent-suite) workflow it is running and which stage it is in.
+An [Orca](https://onorca.dev) plugin for Pi workflows powered by
+[pi-agent-suite](https://www.npmjs.com/package/pi-agent-suite). It shows which workflow each agent
+is running and which stage it is in.
 
 ![The PI Workflow Status panel: Activity list above the pipeline of the selected job](assets/screenshot-panel.png)
 
@@ -36,7 +37,8 @@ refresh with the panel, at most every 15 s.
 ## Requirements
 
 - Orca 1.4.259 or later
-- Pi with Pi Agent Suite workflows, which write `workflow-state` entries into Pi's session files
+- Pi with [pi-agent-suite](https://www.npmjs.com/package/pi-agent-suite) workflows, which write
+  `workflow-state` entries into Pi's session files
 
 ## Install
 
